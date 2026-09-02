@@ -1,0 +1,14 @@
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\CorsConfig.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\GlobalExceptionHandler.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\JwtAuthFilter.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\AlertController.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\AuthController.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\DashboardController.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\DashboardApplication.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\filter\ApiRequestResponseLoggingFilter.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\repository\AdminAuthRepository.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\repository\AlertRepository.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\repository\DashboardRepository.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\AlertService.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\AuthService.java
+C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\JwtService.java

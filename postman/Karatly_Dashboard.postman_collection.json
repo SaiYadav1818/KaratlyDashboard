@@ -1,0 +1,298 @@
+{
+  "info": {
+    "_postman_id": "3f0a9c1e-7b4a-4d2e-9c1e-karatly-dashboard",
+    "name": "Karatly Admin Dashboard",
+    "description": "Karatly admin dashboard backend APIs (stored-procedure driven).\n\n1. Run Login first -> it auto-saves the token to the {{token}} collection variable.\n2. All other requests use that Bearer token automatically.\n3. Change {{baseUrl}} to your backend host.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "clientId", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.token) {",
+                  "    pm.collectionVariables.set('token', json.token);",
+                  "    pm.collectionVariables.set('clientId', '');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9999999999\",\n  \"password\": \"admin@123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Validate Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/validate-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "validate-token"]
+            }
+          }
+        },
+        {
+          "name": "Change Own Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"admin@123\",\n  \"newPassword\": \"NewPass@123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/change-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "change-password"]
+            }
+          }
+        },
+        {
+          "name": "Reset Password (super admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9999999999\",\n  \"newPassword\": \"Reset@123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "reset-password"]
+            }
+          }
+        },
+        {
+          "name": "Create Admin (super admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"9876543210\",\n  \"fullName\": \"Ops Admin\",\n  \"email\": \"ops@karatly.net\",\n  \"password\": \"OpsPass@123\",\n  \"isSuperAdmin\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/create-admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "create-admin"]
+            }
+          }
+        },
+        {
+          "name": "List Admins (super admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/auth/admins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "auth", "admins"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Overview (KPIs + daily)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/overview?days=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "overview"],
+              "query": [
+                { "key": "days", "value": "30" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Users List",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/users?search=&kyc=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "users"],
+              "query": [
+                { "key": "from", "value": "", "disabled": true },
+                { "key": "to", "value": "", "disabled": true },
+                { "key": "search", "value": "" },
+                { "key": "kyc", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "User Detail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/users/{{clientId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "users", "{{clientId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Orders Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/orders-summary?days=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "orders-summary"],
+              "query": [
+                { "key": "days", "value": "30" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Recent Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/recent-transactions?days=7&limit=50&status=ALL",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "recent-transactions"],
+              "query": [
+                { "key": "days", "value": "7" },
+                { "key": "limit", "value": "50" },
+                { "key": "status", "value": "ALL", "description": "ALL | SUCCESS | FAILED | PENDING" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "List Alerts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/alerts?days=7&category=&severity=&status=open",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "alerts"],
+              "query": [
+                { "key": "days", "value": "7" },
+                { "key": "category", "value": "", "description": "PAID_NO_GOLD | GOLD_NO_PAYMENT | PENDING_OVER_24H | etc." },
+                { "key": "severity", "value": "", "description": "critical | high | medium" },
+                { "key": "status", "value": "open", "description": "open | acknowledged | resolved | ALL" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Alerts Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/alerts/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "alerts", "summary"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Alerts (manual scan)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/alerts/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "alerts", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Acknowledge Alert",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/alerts/1/acknowledge",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "alerts", "1", "acknowledge"]
+            }
+          }
+        },
+        {
+          "name": "Resolve Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Refunded to user\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/alerts/1/resolve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "alerts", "1", "resolve"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
