@@ -236,6 +236,8 @@ proc: BEGIN
       );
 
     -- 10. ZERO_QUANTITY_PURCHASE: buy order completed but quantity = 0
+    --     quantity extraction must ignore empty string AND the literal 'null' string
+    --     (some Augmont responses store "quantity":"null")
     INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
     SELECT
         'ZERO_QUANTITY_PURCHASE', 'critical',
@@ -247,7 +249,9 @@ proc: BEGIN
       AND o.order_status IN ('completed', 'confirmed')
       AND CAST(COALESCE(
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), 'null'),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), 'null'),
           '0'
       ) AS DECIMAL(18,4)) = 0
       AND COALESCE(o.total_amount, 0) > 0
