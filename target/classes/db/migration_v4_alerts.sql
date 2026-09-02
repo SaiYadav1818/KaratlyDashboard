@@ -164,7 +164,7 @@ proc: BEGIN
     LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
     WHERE o.order_type IN ('digital_purchase', 'digital_sell')
       AND cfo.id IS NULL
-      AND pt.id IS NULL
+      AND pt.payment_id IS NULL
       AND o.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       AND NOT EXISTS (
           SELECT 1 FROM dashboard_alerts a

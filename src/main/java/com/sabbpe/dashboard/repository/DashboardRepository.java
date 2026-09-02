@@ -76,4 +76,9 @@ public class DashboardRepository {
         List<Map<String, Object>> rows = jdbc.queryForList("CALL sp_dashboard_mis_coupons()");
         return rows.isEmpty() ? Map.of() : rows.get(0);
     }
+
+    public Map<String, Object> misWatchlist() {
+        List<Map<String, Object>> rows = jdbc.queryForList("CALL sp_dashboard_mis_watchlist()");
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
 }

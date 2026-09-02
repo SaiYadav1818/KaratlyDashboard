@@ -10,12 +10,16 @@
 --   PART 1 : dashboard procs (sp_dashboard_kpis/daily/users/user_*)
 --   PART 2 : admin auth  (table dashboard_admin_users + sp_dashboard_admin_*)
 --   PART 3 : orders summary + recent transactions procs
+--   PART 4 : alerts system (table dashboard_alerts + sp_dashboard_alerts_*)
+--   PART 5 : order audit trail (sp_dashboard_order_audit)
+--   PART 6 : MIS overview (sp_dashboard_mis_overview/aum/coupons)
 --
 -- NOTE:
 --   * Every proc uses DROP PROCEDURE IF EXISTS -> SAFE to re-run.
 --   * PART 2 creates table dashboard_admin_users and seeds a
 --     super admin: phone 9999999999 / password admin@123
 --     (CHANGE THIS PASSWORD AFTER FIRST LOGIN).
+--   * PART 4 creates table dashboard_alerts for the alerts system.
 -- ============================================================
 
 -- ===================== PART 1 =====================
@@ -154,9 +158,9 @@ proc: BEGIN
         SELECT v_since AS d
         UNION ALL
         SELECT d + INTERVAL 1 DAY FROM dates WHERE d < CURDATE()
-    )
+)
     SELECT
-        d.d AS date,
+        DATE_FORMAT(d.d, '%Y-%m-%d') AS date,
         COALESCE(u.cnt, 0) AS new_registrations,
         COALESCE(b.cnt, 0) AS bank_validations,
         COALESCE(o.sell_count, 0)    AS sells,
@@ -256,12 +260,19 @@ proc: BEGIN
         cp.pan_verified,
         cp.aadhaar_verified,
         cp.bank_verified,
+        cp.provider_client_reference AS augmont_unique_id,
         DATE_FORMAT(cp.created_at, '%Y-%m-%d %H:%i:%s') AS registered_at,
         (SELECT COUNT(*) FROM client_bank_accounts cba
           WHERE cba.client_id = cp.client_id) AS bank_accounts,
+        (SELECT cba.account_holder_name FROM client_bank_accounts cba
+          WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_holder,
         (SELECT cba.account_number FROM client_bank_accounts cba
           WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
-          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_account,
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_number,
+        (SELECT cba.ifsc_code FROM client_bank_accounts cba
+          WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_ifsc,
         (SELECT COUNT(*) FROM client_addresses ca
           WHERE ca.client_id = cp.client_id) AS delivery_addresses,
         COALESCE(agg.buy_count, 0)      AS buy_count,
@@ -693,6 +704,528 @@ proc: BEGIN
       )
     ORDER BY o.created_at DESC
     LIMIT p_limit;
+END//
+
+DELIMITER ;
+
+-- ===================== PART 5 =====================
+-- ============================================================
+-- Karatly Admin Dashboard - Order Audit Trail
+-- Database: sabbpekaratly (MariaDB)
+--
+-- Procs:
+--   sp_dashboard_order_audit(p_merchant_txn_id) -> full audit for one order
+--     joins orders + cashfreepg_orders + cashfreepg_payments + cashfreepg_webhooks
+--     returns: order details, CF order, CF payment, CF webhook, Easebuzz, Augmont response
+-- ============================================================
+
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS sp_dashboard_order_audit//
+
+CREATE PROCEDURE sp_dashboard_order_audit(IN p_merchant_txn_id VARCHAR(100))
+proc: BEGIN
+    SELECT
+        o.order_id,
+        o.merchant_transaction_id,
+        o.order_type,
+        o.order_status,
+        COALESCE(o.total_amount, 0) AS total_amount,
+        o.order_reference,
+        o.provider_reference AS augmont_txn_id,
+        o.failure_reason,
+        DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS order_date,
+
+        cfo.id AS cf_order_row_id,
+        cfo.sabbpe_order_id AS cf_sabbpe_order_id,
+        cfo.provider_order_id AS cf_provider_order_id,
+        cfo.order_status AS cf_order_status,
+        DATE_FORMAT(cfo.created_at, '%Y-%m-%d %H:%i:%s') AS cf_order_date,
+
+        cfp.id AS cf_payment_row_id,
+        cfp.cf_payment_id,
+        cfp.payment_status AS cf_payment_status,
+        cfp.payment_method,
+        cfp.bank_reference AS cf_rrn,
+        DATE_FORMAT(cfp.created_at, '%Y-%m-%d %H:%i:%s') AS cf_payment_date,
+
+        cfw.id AS cf_webhook_row_id,
+        cfw.webhook_type,
+        cfw.payment_status AS webhook_payment_status,
+        cfw.processed AS webhook_processed,
+        DATE_FORMAT(COALESCE(cfw.processed_time, cfw.created_at), '%Y-%m-%d %H:%i:%s') AS webhook_date,
+
+        pt.payment_id AS easebuzz_payment_id,
+        pt.payment_status AS easebuzz_payment_status,
+
+        CAST(COALESCE(
+            NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
+            '0'
+        ) AS DECIMAL(18,4)) AS augmont_quantity,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.goldBalance')) AS gold_balance,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.silverBalance')) AS silver_balance,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.invoiceNumber')) AS augmont_invoice,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.message')) AS augmont_message,
+        CASE WHEN JSON_EXTRACT(o.provider_response_payload, '$.statusCode') IS NOT NULL
+             THEN JSON_EXTRACT(o.provider_response_payload, '$.statusCode')
+             ELSE NULL END AS augmont_status_code,
+
+        CASE WHEN cfo.id IS NOT NULL THEN 'YES' ELSE 'NO' END AS cashfree_order_created,
+        CASE WHEN cfw.id IS NOT NULL THEN 'YES' ELSE 'NO' END AS webhook_received,
+        CASE WHEN cfp.id IS NOT NULL THEN 'YES' ELSE 'NO' END AS payment_recorded,
+        CASE WHEN o.provider_reference IS NOT NULL AND TRIM(o.provider_reference) <> ''
+             THEN 'YES' ELSE 'NO' END AS gold_purchased
+
+    FROM orders o
+    LEFT JOIN cashfreepg_orders   cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id   = cfo.sabbpe_order_id
+    LEFT JOIN cashfreepg_webhooks cfw ON cfw.sabbpe_order_id   = cfo.sabbpe_order_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    WHERE o.merchant_transaction_id = p_merchant_txn_id
+    ORDER BY o.created_at DESC;
+END//
+
+DELIMITER ;
+
+-- ===================== PART 4 =====================
+-- ============================================================
+-- Karatly Admin Dashboard - Alerts System
+-- Database: sabbpekaratly (MariaDB)
+--
+-- Table: dashboard_alerts
+-- Procs:
+--   sp_dashboard_alerts_refresh()                    -> scan & insert new open alerts
+--   sp_dashboard_alerts_list(p_days,p_cat,p_sev,p_st)-> list with filters
+--   sp_dashboard_alerts_summary()                    -> counts by category + severity
+--   sp_dashboard_alerts_acknowledge(p_id, p_admin_id)-> mark acknowledged
+--   sp_dashboard_alerts_resolve(p_id, p_admin_id, p_note) -> mark resolved
+--
+-- Scan categories (10):
+--   PAID_NO_GOLD              - payment SUCCESS but no Augmont purchase
+--   GOLD_NO_PAYMENT           - Augmont purchase exists but payment not SUCCESS
+--   PENDING_OVER_24H          - order pending > 24 hours
+--   PENDING_OVER_72H          - order pending > 72 hours
+--   MISSING_CASHFREE_WEBHOOK  - Cashfree order created but no payment record
+--   MISSING_EASEBUZZ_RECORD   - Easebuzz order but no payment_transactions row
+--   AUGMONT_PURCHASE_FAILED   - order completed but Augmont error in response
+--   HIGH_VALUE_PENDING        - buy order > 50000 and payment not SUCCESS
+--   DUPLICATE_MERCHANT_TXN    - same merchant_transaction_id used more than once
+--   ZERO_QUANTITY_PURCHASE    - buy order completed but quantity = 0
+-- ============================================================
+
+DELIMITER //
+
+CREATE TABLE IF NOT EXISTS dashboard_alerts (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    category        VARCHAR(50)  NOT NULL,
+    severity        VARCHAR(10)  NOT NULL DEFAULT 'high',
+    order_id        VARCHAR(64)  DEFAULT NULL,
+    client_id       VARCHAR(64)  DEFAULT NULL,
+    client_name     VARCHAR(120) DEFAULT NULL,
+    client_mobile   VARCHAR(20)  DEFAULT NULL,
+    amount          DECIMAL(18,2) DEFAULT NULL,
+    message         TEXT         NOT NULL,
+    status          VARCHAR(20)  NOT NULL DEFAULT 'open',
+    acknowledged_by BIGINT       DEFAULT NULL,
+    acknowledged_at TIMESTAMP    NULL     DEFAULT NULL,
+    resolved_by     BIGINT       DEFAULT NULL,
+    resolved_at     TIMESTAMP    NULL     DEFAULT NULL,
+    resolve_note    TEXT         DEFAULT NULL,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_alerts_status (status),
+    INDEX idx_alerts_category (category),
+    INDEX idx_alerts_severity (severity),
+    INDEX idx_alerts_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_alerts_refresh//
+
+CREATE PROCEDURE sp_dashboard_alerts_refresh()
+proc: BEGIN
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'PAID_NO_GOLD', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Payment successful (₹', FORMAT(o.total_amount, 2), ') but no gold credited. Augmont purchase missing.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE o.order_type = 'digital_purchase'
+      AND UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) = 'SUCCESS'
+      AND (o.provider_reference IS NULL OR TRIM(o.provider_reference) = '')
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'PAID_NO_GOLD' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'GOLD_NO_PAYMENT', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Gold credited (Augmont ref: ', o.provider_reference, ') but payment status is not SUCCESS.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE o.order_type = 'digital_purchase'
+      AND (o.provider_reference IS NOT NULL AND TRIM(o.provider_reference) <> '')
+      AND UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) NOT IN ('SUCCESS', '')
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'GOLD_NO_PAYMENT' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'PENDING_OVER_24H', 'high', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Order pending for >24 hours (created: ', DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i'), '). Status: ', COALESCE(o.order_status, 'unknown'), '.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    WHERE o.order_type IN ('digital_purchase', 'digital_sell', 'physical_redemption')
+      AND o.order_status NOT IN ('completed', 'confirmed', 'failed', 'cancelled', 'fulfillment_failed')
+      AND o.created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'PENDING_OVER_24H' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'PENDING_OVER_72H', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Order pending for >72 HOURS (created: ', DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i'), '). Urgent attention needed.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    WHERE o.order_type IN ('digital_purchase', 'digital_sell', 'physical_redemption')
+      AND o.order_status NOT IN ('completed', 'confirmed', 'failed', 'cancelled', 'fulfillment_failed')
+      AND o.created_at < DATE_SUB(NOW(), INTERVAL 72 HOUR)
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'PENDING_OVER_72H' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'MISSING_CASHFREE_WEBHOOK', 'high', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Cashfree order (', cfo.merchant_order_id, ') created but no payment record received. Webhook may have failed.')
+    FROM cashfreepg_orders cfo
+    JOIN orders o ON cfo.merchant_order_id = o.merchant_transaction_id
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE cfp.id IS NULL
+      AND cfo.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'MISSING_CASHFREE_WEBHOOK' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'MISSING_EASEBUZZ_RECORD', 'high', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Easebuzz order (', o.merchant_transaction_id, ') created but no payment record in payment_transactions.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    WHERE o.order_type IN ('digital_purchase', 'digital_sell')
+      AND cfo.id IS NULL
+      AND pt.payment_id IS NULL
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'MISSING_EASEBUZZ_RECORD' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'AUGMONT_PURCHASE_FAILED', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Order marked completed but Augmont purchase failed: ', COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.message')), o.failure_reason, 'unknown error'), '.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    WHERE o.order_type = 'digital_purchase'
+      AND o.order_status IN ('completed', 'confirmed')
+      AND o.provider_response_payload IS NOT NULL
+      AND (JSON_EXTRACT(o.provider_response_payload, '$.statusCode') IS NOT NULL AND JSON_EXTRACT(o.provider_response_payload, '$.statusCode') != 200)
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'AUGMONT_PURCHASE_FAILED' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'HIGH_VALUE_PENDING', 'high', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('High-value buy order (₹', FORMAT(o.total_amount, 2), ') pending payment confirmation. Needs manual check.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE o.order_type = 'digital_purchase'
+      AND COALESCE(o.total_amount, 0) > 50000
+      AND UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) NOT IN ('SUCCESS', 'FAILED')
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'HIGH_VALUE_PENDING' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'DUPLICATE_MERCHANT_TXN', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Duplicate merchant_transaction_id detected: ', o.merchant_transaction_id, '. Possible duplicate order.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    JOIN (SELECT merchant_transaction_id FROM orders WHERE merchant_transaction_id IS NOT NULL AND merchant_transaction_id != '' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY merchant_transaction_id HAVING COUNT(*) > 1) dup ON o.merchant_transaction_id = dup.merchant_transaction_id
+    WHERE o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'DUPLICATE_MERCHANT_TXN' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
+    SELECT 'ZERO_QUANTITY_PURCHASE', 'critical', o.order_id, o.client_id, cp.full_name, cp.mobile, o.total_amount,
+        CONCAT('Buy order completed but Augmont quantity is 0. Payment of ₹', FORMAT(o.total_amount, 2), ' received but no metal credited.')
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    WHERE o.order_type = 'digital_purchase'
+      AND o.order_status IN ('completed', 'confirmed')
+      AND CAST(COALESCE(
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), 'null'),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), 'null'),
+          '0'
+      ) AS DECIMAL(18,4)) = 0
+      AND COALESCE(o.total_amount, 0) > 0
+      AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'ZERO_QUANTITY_PURCHASE' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
+
+    SELECT category, severity, COUNT(*) AS cnt
+    FROM dashboard_alerts WHERE status = 'open'
+    GROUP BY category, severity
+    ORDER BY FIELD(severity, 'critical', 'high', 'medium'), category;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_alerts_list//
+
+CREATE PROCEDURE sp_dashboard_alerts_list(
+    IN p_days     INT,
+    IN p_category VARCHAR(50),
+    IN p_severity VARCHAR(10),
+    IN p_status   VARCHAR(20)
+)
+proc: BEGIN
+    DECLARE v_since DATE;
+    SET v_since = DATE_SUB(CURDATE(), INTERVAL p_days DAY);
+
+    SELECT a.id, a.category, a.severity, a.order_id, a.client_id, a.client_name, a.client_mobile,
+        a.amount, a.message, a.status, a.acknowledged_by,
+        DATE_FORMAT(a.acknowledged_at, '%Y-%m-%d %H:%i:%s') AS acknowledged_at,
+        a.resolved_by,
+        DATE_FORMAT(a.resolved_at, '%Y-%m-%d %H:%i:%s') AS resolved_at,
+        a.resolve_note,
+        DATE_FORMAT(a.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(a.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM dashboard_alerts a
+    WHERE a.created_at >= v_since
+      AND (p_category IS NULL OR p_category = '' OR a.category = p_category)
+      AND (p_severity IS NULL OR p_severity = '' OR a.severity = p_severity)
+      AND (p_status   IS NULL OR p_status   = '' OR p_status = 'ALL' OR a.status = p_status)
+    ORDER BY FIELD(a.severity, 'critical', 'high', 'medium') ASC, a.created_at DESC;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_alerts_summary//
+
+CREATE PROCEDURE sp_dashboard_alerts_summary()
+proc: BEGIN
+    SELECT
+        COUNT(*) AS total_open,
+        SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+        SUM(CASE WHEN severity = 'high'     THEN 1 ELSE 0 END) AS high_count,
+        SUM(CASE WHEN severity = 'medium'   THEN 1 ELSE 0 END) AS medium_count,
+        (SELECT COUNT(*) FROM dashboard_alerts WHERE status = 'acknowledged') AS acknowledged,
+        (SELECT COUNT(*) FROM dashboard_alerts WHERE status = 'resolved') AS resolved_total
+    FROM dashboard_alerts
+    WHERE status = 'open';
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_alerts_acknowledge//
+
+CREATE PROCEDURE sp_dashboard_alerts_acknowledge(IN p_id BIGINT, IN p_admin_id BIGINT)
+proc: BEGIN
+    UPDATE dashboard_alerts SET status = 'acknowledged', acknowledged_by = p_admin_id, acknowledged_at = NOW()
+    WHERE id = p_id AND status = 'open';
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_alerts_resolve//
+
+CREATE PROCEDURE sp_dashboard_alerts_resolve(IN p_id BIGINT, IN p_admin_id BIGINT, IN p_note TEXT)
+proc: BEGIN
+    UPDATE dashboard_alerts SET status = 'resolved', resolved_by = p_admin_id, resolved_at = NOW(), resolve_note = p_note
+    WHERE id = p_id AND status IN ('open', 'acknowledged');
+END//
+
+DELIMITER ;
+
+-- ===================== PART 6 =====================
+-- ============================================================
+-- Karatly Admin Dashboard - MIS Overview
+-- Database: sabbpekaratly (MariaDB)
+--
+-- Procs:
+--   sp_dashboard_mis_overview()  -> GMV + Transaction Count + Users + Metals + Coupons
+--   sp_dashboard_mis_aum()       -> Metal Balance (AUM) metrics
+--   sp_dashboard_mis_coupons()   -> Coupon usage metrics
+-- ============================================================
+
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS sp_dashboard_mis_overview//
+
+CREATE PROCEDURE sp_dashboard_mis_overview()
+proc: BEGIN
+    DECLARE v_ytd_start DATE;
+    DECLARE v_mtd_start DATE;
+    DECLARE v_ftd_start DATE;
+    DECLARE v_today DATE;
+
+    SET v_today = CURDATE();
+    SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
+    SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
+    SET v_ftd_start = v_today;
+
+    SELECT
+        COALESCE(ytd.ytd_count, 0) AS gmv_ytd_count,
+        COALESCE(ytd.ytd_value, 0) AS gmv_ytd_value,
+        COALESCE(mtd.mtd_count, 0) AS gmv_mtd_count,
+        COALESCE(mtd.mtd_value, 0) AS gmv_mtd_value,
+        COALESCE(ftd.ftd_count, 0) AS gmv_ftd_count,
+        COALESCE(ftd.ftd_value, 0) AS gmv_ftd_value,
+        COALESCE(txn.txn_total, 0) AS txn_mtd_total,
+        COALESCE(txn.txn_success, 0) AS txn_mtd_success,
+        COALESCE(txn.txn_failed, 0) AS txn_mtd_failed,
+        COALESCE(usr.unique_users, 0) AS unique_users,
+        COALESCE(usr.repeat_users, 0) AS repeat_users,
+        COALESCE(usr.flagged_users, 0) AS flagged_users,
+        COALESCE(met.gold_grams, 0) AS gold_grams,
+        COALESCE(met.gold_value, 0) AS gold_value,
+        COALESCE(met.silver_grams, 0) AS silver_grams,
+        COALESCE(met.silver_value, 0) AS silver_value,
+        COALESCE(diam.diamond_carats, 0) AS diamond_carats,
+        COALESCE(diam.diamond_value, 0) AS diamond_value,
+        COALESCE(diam.diamond_count, 0) AS diamond_count,
+        CASE WHEN COALESCE(ytd.ytd_value, 0) > 0 THEN ROUND(COALESCE(met.gold_value, 0) / ytd.ytd_value * 100, 1) ELSE 0 END AS gold_pct_gmv,
+        CASE WHEN COALESCE(ytd.ytd_value, 0) > 0 THEN ROUND(COALESCE(met.silver_value, 0) / ytd.ytd_value * 100, 1) ELSE 0 END AS silver_pct_gmv,
+        CASE WHEN COALESCE(ytd.ytd_value, 0) > 0 THEN ROUND(COALESCE(diam.diamond_value, 0) / ytd.ytd_value * 100, 1) ELSE 0 END AS diamond_pct_gmv,
+        COALESCE(cpn.coupon_count, 0) AS coupons_redeemed_count,
+        COALESCE(cpn.coupon_value, 0) AS coupons_redeemed_value
+    FROM (SELECT 1) dummy
+    LEFT JOIN (SELECT COUNT(*) AS ytd_count, SUM(COALESCE(o.total_amount, 0)) AS ytd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_ytd_start) ytd ON 1=1
+    LEFT JOIN (SELECT COUNT(*) AS mtd_count, SUM(COALESCE(o.total_amount, 0)) AS mtd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_mtd_start) mtd ON 1=1
+    LEFT JOIN (SELECT COUNT(*) AS ftd_count, SUM(COALESCE(o.total_amount, 0)) AS ftd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_ftd_start) ftd ON 1=1
+    LEFT JOIN (
+        SELECT COUNT(*) AS txn_total,
+            SUM(CASE WHEN UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) = 'SUCCESS' THEN 1 ELSE 0 END) AS txn_success,
+            SUM(CASE WHEN UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) = 'FAILED' THEN 1 ELSE 0 END) AS txn_failed
+        FROM orders o
+        LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+        LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+        LEFT JOIN cashfreepg_payments cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+        WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_mtd_start
+    ) txn ON 1=1
+    LEFT JOIN (
+        SELECT COUNT(DISTINCT cp.client_id) AS unique_users,
+            SUM(CASE WHEN o.client_order_count > 1 THEN 1 ELSE 0 END) AS repeat_users,
+            (SELECT COUNT(*) FROM client_profile WHERE kyc_status = 'rejected' OR kyc_status = 'failed') AS flagged_users
+        FROM client_profile cp
+        LEFT JOIN (SELECT client_id, COUNT(*) AS client_order_count FROM orders WHERE order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') GROUP BY client_id) o ON cp.client_id = o.client_id
+    ) usr ON 1=1
+    LEFT JOIN (
+        SELECT
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'gold' AND o.order_status IN ('completed','confirmed') THEN CAST(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''), '0') AS DECIMAL(18,4)) ELSE 0 END) AS gold_grams,
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'gold' THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS gold_value,
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'silver' AND o.order_status IN ('completed','confirmed') THEN CAST(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''), '0') AS DECIMAL(18,4)) ELSE 0 END) AS silver_grams,
+            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'silver' THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS silver_value
+        FROM orders o WHERE o.order_type = 'digital_purchase' AND o.created_at >= v_ytd_start
+    ) met ON 1=1
+    LEFT JOIN (
+        SELECT COUNT(*) AS diamond_count, COALESCE(SUM(o.total_amount), 0) AS diamond_value, COALESCE(SUM(di.weight), 0) AS diamond_carats
+        FROM orders o
+        LEFT JOIN JSON_TABLE(o.pricing_snapshot, '$.items[*]' COLUMNS (productId VARCHAR(36) PATH '$.productId')) jt ON TRUE
+        LEFT JOIN diamond_inventory di ON di.id = jt.productId
+        WHERE o.order_type = 'diamond_purchase' AND o.order_status IN ('completed', 'confirmed') AND o.created_at >= v_ytd_start
+    ) diam ON 1=1
+    LEFT JOIN (SELECT COUNT(*) AS coupon_count, SUM(cu.discount_amount) AS coupon_value FROM coupon_usage cu WHERE cu.used_at >= v_ytd_start) cpn ON 1=1;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_mis_aum//
+
+CREATE PROCEDURE sp_dashboard_mis_aum()
+proc: BEGIN
+    DECLARE v_ytd_start DATE;
+    DECLARE v_mtd_start DATE;
+    DECLARE v_today DATE;
+    DECLARE v_total_users INT;
+
+    SET v_today = CURDATE();
+    SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
+    SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
+    SELECT COUNT(*) INTO v_total_users FROM client_profile;
+
+    SELECT
+        COALESCE(SUM(CASE WHEN o.created_at >= v_ytd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_ytd,
+        COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_mtd,
+        COALESCE(SUM(CASE WHEN DATE(o.created_at) = v_today THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_ftd,
+        CASE WHEN DAY(v_today) > 0 THEN ROUND(COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) / DAY(v_today) * 30, 0) ELSE 0 END AS aum_run_rate_monthly,
+        CASE WHEN v_total_users > 0 THEN ROUND(COALESCE(SUM(COALESCE(o.total_amount, 0)), 0) / v_total_users, 0) ELSE 0 END AS avg_holding_per_user,
+        CASE WHEN COALESCE(SUM(CASE WHEN o.order_type = 'digital_purchase' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) > 0
+             THEN ROUND(COALESCE(SUM(CASE WHEN o.order_type = 'digital_sell' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) / COALESCE(SUM(CASE WHEN o.order_type = 'digital_purchase' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 1) * 100, 1)
+             ELSE 0 END AS redemption_rate_pct
+    FROM orders o
+    WHERE o.order_type IN ('digital_purchase', 'digital_sell') AND o.order_status IN ('completed', 'confirmed');
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_mis_coupons//
+
+CREATE PROCEDURE sp_dashboard_mis_coupons()
+proc: BEGIN
+    DECLARE v_ytd_start DATE;
+    DECLARE v_mtd_start DATE;
+    SET v_ytd_start = CONCAT(YEAR(CURDATE()), '-01-01');
+    SET v_mtd_start = CONCAT(YEAR(CURDATE()), '-', MONTH(CURDATE()), '-01');
+
+    SELECT
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_ytd_start THEN 1 ELSE 0 END), 0) AS coupons_ytd_count,
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_ytd_start THEN cu.discount_amount ELSE 0 END), 0) AS coupons_ytd_value,
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start THEN 1 ELSE 0 END), 0) AS coupons_mtd_count,
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start THEN cu.discount_amount ELSE 0 END), 0) AS coupons_mtd_value
+    FROM coupon_usage cu;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_mis_watchlist//
+
+CREATE PROCEDURE sp_dashboard_mis_watchlist()
+proc: BEGIN
+    DECLARE v_since DATETIME;
+    SET v_since = DATE_SUB(NOW(), INTERVAL 30 DAY);
+
+    WITH rate_rows AS (
+        SELECT
+            r.metal_type,
+            r.rate_per_unit AS buy_rate,
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(r.api_response_payload,
+                CONCAT('$.result.data.rates.', IF(r.metal_type = 'gold', 'gSell', 'sSell')))) AS DECIMAL(18,2)) AS sell_rate
+        FROM metal_price_cache r
+        JOIN (
+            SELECT metal_type, MAX(fetched_at) AS last_fetched
+            FROM metal_price_cache
+            WHERE provider = 'AUGMONT' AND metal_type IN ('gold','silver')
+            GROUP BY metal_type
+        ) latest ON r.provider = 'AUGMONT' AND r.metal_type = latest.metal_type AND r.fetched_at = latest.last_fetched
+    ),
+    spreads AS (
+        SELECT metal_type, buy_rate, sell_rate,
+               ROUND((buy_rate - sell_rate) / buy_rate * 100, 1) AS spread_pct
+        FROM rate_rows
+        WHERE sell_rate IS NOT NULL AND buy_rate > 0
+    ),
+    volumes AS (
+        SELECT metal, SUM(grams) AS grams FROM (
+            SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') AS metal,
+                   CAST(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''), '0') AS DECIMAL(18,4)) AS grams
+            FROM orders o
+            WHERE o.order_type = 'digital_purchase' AND o.order_status IN ('completed','confirmed') AND o.created_at >= v_since
+            UNION ALL
+            SELECT 'diamond', di.weight
+            FROM orders o
+            LEFT JOIN JSON_TABLE(o.pricing_snapshot, '$.items[*]' COLUMNS (productId VARCHAR(36) PATH '$.productId')) jt ON TRUE
+            LEFT JOIN diamond_inventory di ON di.id = jt.productId
+            WHERE o.order_type = 'diamond_purchase' AND o.order_status IN ('completed','confirmed') AND o.created_at >= v_since
+        ) v
+        GROUP BY metal
+    )
+    SELECT
+        (SELECT metal_type FROM spreads ORDER BY spread_pct DESC LIMIT 1) AS high_margin_metal,
+        (SELECT spread_pct  FROM spreads ORDER BY spread_pct DESC LIMIT 1) AS high_margin_pct,
+        (SELECT metal_type FROM spreads ORDER BY spread_pct ASC  LIMIT 1) AS low_margin_metal,
+        (SELECT spread_pct  FROM spreads ORDER BY spread_pct ASC  LIMIT 1) AS low_margin_pct,
+        (SELECT metal FROM volumes ORDER BY grams DESC LIMIT 1) AS high_volume_metal,
+        (SELECT grams FROM volumes ORDER BY grams DESC LIMIT 1) AS high_volume_grams,
+        (SELECT GROUP_CONCAT(metal ORDER BY metal SEPARATOR ', ') FROM (
+             SELECT 'gold' AS metal UNION SELECT 'silver' UNION SELECT 'platinum' UNION SELECT 'pearl' UNION SELECT 'diamond'
+         ) allmetals
+         WHERE metal NOT IN (SELECT metal FROM volumes WHERE grams > 0)) AS zero_volume_metals;
 END//
 
 DELIMITER ;

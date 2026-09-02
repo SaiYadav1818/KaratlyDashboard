@@ -164,7 +164,7 @@ proc: BEGIN
     LEFT JOIN cashfreepg_orders cfo ON cfo.merchant_order_id = o.merchant_transaction_id
     WHERE o.order_type IN ('digital_purchase', 'digital_sell')
       AND cfo.id IS NULL
-      AND pt.id IS NULL
+      AND pt.payment_id IS NULL
       AND o.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
       AND NOT EXISTS (
           SELECT 1 FROM dashboard_alerts a
@@ -236,6 +236,8 @@ proc: BEGIN
       );
 
     -- 10. ZERO_QUANTITY_PURCHASE: buy order completed but quantity = 0
+    --     quantity extraction must ignore empty string AND the literal 'null' string
+    --     (some Augmont responses store "quantity":"null")
     INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
     SELECT
         'ZERO_QUANTITY_PURCHASE', 'critical',
@@ -247,7 +249,9 @@ proc: BEGIN
       AND o.order_status IN ('completed', 'confirmed')
       AND CAST(COALESCE(
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), 'null'),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), 'null'),
           '0'
       ) AS DECIMAL(18,4)) = 0
       AND COALESCE(o.total_amount, 0) > 0

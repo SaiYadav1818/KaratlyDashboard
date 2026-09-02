@@ -96,7 +96,10 @@ public class DashboardController {
 
     /**
      * GET /api/v1/admin/dashboard/mis-overview
-     * Full MIS snapshot: GMV, transaction count, users, metals, coupons.
+     * Full MIS snapshot: GMV, transaction count, users, metals (gold/silver/diamond), coupons,
+     * AUM, watchlist, MDR. Sections without data return null (frontend should hide them):
+     *   augmont_commission / safegold_commission / wallet_points_credited / wallet_points_earned
+     *   / cashback_redeemed / net_profit / profit_pct
      */
     @GetMapping("/mis-overview")
     public Map<String, Object> misOverview() {
@@ -104,12 +107,21 @@ public class DashboardController {
         response.put("gmv", repository.misOverview());
         response.put("aum", repository.misAum());
         response.put("coupons", repository.misCoupons());
+        response.put("watchlist", repository.misWatchlist());
         response.put("mdr", Map.of(
             "upi", 0.30,
             "debit_card", 0.90,
             "credit_card", 1.80,
             "netbanking", 0.60
         ));
+        // Sections not available from sabbpekaratly -> null so UI can hide them
+        response.put("augmont_commission", null);
+        response.put("safegold_commission", null);
+        response.put("wallet_points_credited", null);
+        response.put("wallet_points_earned", null);
+        response.put("cashback_redeemed", null);
+        response.put("net_profit", null);
+        response.put("profit_pct", null);
         return response;
     }
 
