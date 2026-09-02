@@ -235,12 +235,19 @@ proc: BEGIN
         cp.pan_verified,
         cp.aadhaar_verified,
         cp.bank_verified,
+        cp.provider_client_reference AS augmont_unique_id,
         DATE_FORMAT(cp.created_at, '%Y-%m-%d %H:%i:%s') AS registered_at,
         (SELECT COUNT(*) FROM client_bank_accounts cba
           WHERE cba.client_id = cp.client_id) AS bank_accounts,
+        (SELECT cba.account_holder_name FROM client_bank_accounts cba
+          WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_holder,
         (SELECT cba.account_number FROM client_bank_accounts cba
           WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
-          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_account,
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_number,
+        (SELECT cba.ifsc_code FROM client_bank_accounts cba
+          WHERE cba.client_id = cp.client_id AND cba.is_primary = 1
+          ORDER BY cba.updated_at DESC LIMIT 1) AS primary_bank_ifsc,
         (SELECT COUNT(*) FROM client_addresses ca
           WHERE ca.client_id = cp.client_id) AS delivery_addresses,
         COALESCE(agg.buy_count, 0)      AS buy_count,

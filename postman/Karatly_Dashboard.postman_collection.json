@@ -217,6 +217,31 @@
               ]
             }
           }
+        },
+        {
+          "name": "Order Audit Trail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/order-audit?merchantTransactionId=KARATLY-CF-...",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "order-audit"],
+              "query": [
+                { "key": "merchantTransactionId", "value": "KARATLY-CF-...", "description": "merchant_transaction_id from orders table" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "MIS Overview",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/mis-overview",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "mis-overview"]
+            }
+          }
         }
       ]
     },

@@ -57,4 +57,23 @@ public class DashboardRepository {
     public List<Map<String, Object>> recentTransactions(int days, int limit, String status) {
         return jdbc.queryForList("CALL sp_dashboard_recent_transactions(?, ?, ?)", days, limit, status);
     }
+
+    public List<Map<String, Object>> orderAudit(String merchantTransactionId) {
+        return jdbc.queryForList("CALL sp_dashboard_order_audit(?)", merchantTransactionId);
+    }
+
+    public Map<String, Object> misOverview() {
+        List<Map<String, Object>> rows = jdbc.queryForList("CALL sp_dashboard_mis_overview()");
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    public Map<String, Object> misAum() {
+        List<Map<String, Object>> rows = jdbc.queryForList("CALL sp_dashboard_mis_aum()");
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    public Map<String, Object> misCoupons() {
+        List<Map<String, Object>> rows = jdbc.queryForList("CALL sp_dashboard_mis_coupons()");
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
 }

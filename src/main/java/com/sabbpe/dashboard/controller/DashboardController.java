@@ -83,6 +83,36 @@ public class DashboardController {
         return response;
     }
 
+    /**
+     * GET /api/v1/admin/dashboard/order-audit?merchantTransactionId=KARATLY-CF-...
+     * Full audit trail: orders + cashfreepg_orders + cashfreepg_payments + cashfreepg_webhooks + Augmont
+     */
+    @GetMapping("/order-audit")
+    public Map<String, Object> orderAudit(@RequestParam String merchantTransactionId) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("audit", repository.orderAudit(merchantTransactionId));
+        return response;
+    }
+
+    /**
+     * GET /api/v1/admin/dashboard/mis-overview
+     * Full MIS snapshot: GMV, transaction count, users, metals, coupons.
+     */
+    @GetMapping("/mis-overview")
+    public Map<String, Object> misOverview() {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("gmv", repository.misOverview());
+        response.put("aum", repository.misAum());
+        response.put("coupons", repository.misCoupons());
+        response.put("mdr", Map.of(
+            "upi", 0.30,
+            "debit_card", 0.90,
+            "credit_card", 1.80,
+            "netbanking", 0.60
+        ));
+        return response;
+    }
+
     private String blankToNull(String value) {
         if (value == null || value.isBlank()) {
             return null;
