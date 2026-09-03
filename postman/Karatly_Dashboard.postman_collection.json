@@ -237,9 +237,13 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/api/v1/admin/dashboard/mis-overview",
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/mis-overview?month=8&year=2026",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "dashboard", "mis-overview"]
+              "path": ["api", "v1", "admin", "dashboard", "mis-overview"],
+              "query": [
+                { "key": "month", "value": "8", "description": "Optional: 1-12 (defaults to current month)" },
+                { "key": "year", "value": "2026", "description": "Optional: e.g. 2026 (defaults to current year)" }
+              ]
             }
           }
         },

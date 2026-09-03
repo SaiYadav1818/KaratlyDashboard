@@ -12,7 +12,7 @@
 --   PART 3 : orders summary + recent transactions procs
 --   PART 4 : alerts system (table dashboard_alerts + sp_dashboard_alerts_*)
 --   PART 5 : order audit trail (sp_dashboard_order_audit)
---   PART 6 : MIS overview (sp_dashboard_mis_overview/aum/coupons)
+--   PART 6 : MIS overview (sp_dashboard_mis_overview/aum/coupons — with month filter)
 --
 -- NOTE:
 --   * Every proc uses DROP PROCEDURE IF EXISTS -> SAFE to re-run.
@@ -1052,26 +1052,34 @@ DELIMITER ;
 -- Database: sabbpekaratly (MariaDB)
 --
 -- Procs:
---   sp_dashboard_mis_overview()  -> GMV + Transaction Count + Users + Metals + Coupons
---   sp_dashboard_mis_aum()       -> Metal Balance (AUM) metrics
---   sp_dashboard_mis_coupons()   -> Coupon usage metrics
+--   sp_dashboard_mis_overview(p_month, p_year)  -> GMV + Transaction Count + Users + Metals + Coupons
+--   sp_dashboard_mis_aum(p_month, p_year)       -> Metal Balance (AUM) metrics
+--   sp_dashboard_mis_coupons(p_month, p_year)   -> Coupon usage metrics
 -- ============================================================
 
 DELIMITER //
 
 DROP PROCEDURE IF EXISTS sp_dashboard_mis_overview//
 
-CREATE PROCEDURE sp_dashboard_mis_overview()
+CREATE PROCEDURE sp_dashboard_mis_overview(IN p_month INT, IN p_year INT)
 proc: BEGIN
     DECLARE v_ytd_start DATE;
     DECLARE v_mtd_start DATE;
-    DECLARE v_ftd_start DATE;
+    DECLARE v_ftd_end DATE;
     DECLARE v_today DATE;
 
     SET v_today = CURDATE();
-    SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
-    SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
-    SET v_ftd_start = v_today;
+
+    -- If month/year provided, scope to that month; else current month
+    IF p_month IS NOT NULL AND p_year IS NOT NULL THEN
+        SET v_ytd_start = CONCAT(p_year, '-01-01');
+        SET v_mtd_start = CONCAT(p_year, '-', p_month, '-01');
+        SET v_ftd_end = LAST_DAY(CONCAT(p_year, '-', p_month, '-01'));
+    ELSE
+        SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
+        SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
+        SET v_ftd_end = v_today;
+    END IF;
 
     SELECT
         COALESCE(ytd.ytd_count, 0) AS gmv_ytd_count,
@@ -1101,7 +1109,7 @@ proc: BEGIN
     FROM (SELECT 1) dummy
     LEFT JOIN (SELECT COUNT(*) AS ytd_count, SUM(COALESCE(o.total_amount, 0)) AS ytd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_ytd_start) ytd ON 1=1
     LEFT JOIN (SELECT COUNT(*) AS mtd_count, SUM(COALESCE(o.total_amount, 0)) AS mtd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_mtd_start) mtd ON 1=1
-    LEFT JOIN (SELECT COUNT(*) AS ftd_count, SUM(COALESCE(o.total_amount, 0)) AS ftd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_ftd_start) ftd ON 1=1
+    LEFT JOIN (SELECT COUNT(*) AS ftd_count, SUM(COALESCE(o.total_amount, 0)) AS ftd_value FROM orders o WHERE o.order_type IN ('digital_purchase','digital_sell','physical_redemption','diamond_purchase') AND o.created_at >= v_mtd_start AND o.created_at <= v_ftd_end) ftd ON 1=1
     LEFT JOIN (
         SELECT COUNT(*) AS txn_total,
             SUM(CASE WHEN UPPER(COALESCE(pt.payment_status, cfp.payment_status, '')) = 'SUCCESS' THEN 1 ELSE 0 END) AS txn_success,
@@ -1139,24 +1147,40 @@ END//
 
 DROP PROCEDURE IF EXISTS sp_dashboard_mis_aum//
 
-CREATE PROCEDURE sp_dashboard_mis_aum()
+CREATE PROCEDURE sp_dashboard_mis_aum(IN p_month INT, IN p_year INT)
 proc: BEGIN
     DECLARE v_ytd_start DATE;
     DECLARE v_mtd_start DATE;
+    DECLARE v_mtd_end DATE;
     DECLARE v_today DATE;
     DECLARE v_total_users INT;
+    DECLARE v_days_in_month INT;
 
     SET v_today = CURDATE();
-    SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
-    SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
+
+    IF p_month IS NOT NULL AND p_year IS NOT NULL THEN
+        SET v_ytd_start = CONCAT(p_year, '-01-01');
+        SET v_mtd_start = CONCAT(p_year, '-', p_month, '-01');
+        SET v_mtd_end = LAST_DAY(CONCAT(p_year, '-', p_month, '-01'));
+        SET v_days_in_month = DAY(LAST_DAY(CONCAT(p_year, '-', p_month, '-01')));
+    ELSE
+        SET v_ytd_start = CONCAT(YEAR(v_today), '-01-01');
+        SET v_mtd_start = CONCAT(YEAR(v_today), '-', MONTH(v_today), '-01');
+        SET v_mtd_end = v_today;
+        SET v_days_in_month = DAY(v_today);
+    END IF;
+
     SELECT COUNT(*) INTO v_total_users FROM client_profile;
 
     SELECT
         COALESCE(SUM(CASE WHEN o.created_at >= v_ytd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_ytd,
-        COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_mtd,
-        COALESCE(SUM(CASE WHEN DATE(o.created_at) = v_today THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_ftd,
-        CASE WHEN DAY(v_today) > 0 THEN ROUND(COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) / DAY(v_today) * 30, 0) ELSE 0 END AS aum_run_rate_monthly,
-        CASE WHEN v_total_users > 0 THEN ROUND(COALESCE(SUM(COALESCE(o.total_amount, 0)), 0) / v_total_users, 0) ELSE 0 END AS avg_holding_per_user,
+        COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start AND o.created_at <= v_mtd_end THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) AS aum_mtd,
+        CASE WHEN v_days_in_month > 0
+             THEN ROUND(COALESCE(SUM(CASE WHEN o.created_at >= v_mtd_start AND o.created_at <= v_mtd_end THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) / v_days_in_month * 30, 0)
+             ELSE 0 END AS aum_run_rate_monthly,
+        CASE WHEN v_total_users > 0
+             THEN ROUND(COALESCE(SUM(COALESCE(o.total_amount, 0)), 0) / v_total_users, 0)
+             ELSE 0 END AS avg_holding_per_user,
         CASE WHEN COALESCE(SUM(CASE WHEN o.order_type = 'digital_purchase' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) > 0
              THEN ROUND(COALESCE(SUM(CASE WHEN o.order_type = 'digital_sell' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 0) / COALESCE(SUM(CASE WHEN o.order_type = 'digital_purchase' THEN COALESCE(o.total_amount, 0) ELSE 0 END), 1) * 100, 1)
              ELSE 0 END AS redemption_rate_pct
@@ -1166,18 +1190,27 @@ END//
 
 DROP PROCEDURE IF EXISTS sp_dashboard_mis_coupons//
 
-CREATE PROCEDURE sp_dashboard_mis_coupons()
+CREATE PROCEDURE sp_dashboard_mis_coupons(IN p_month INT, IN p_year INT)
 proc: BEGIN
     DECLARE v_ytd_start DATE;
     DECLARE v_mtd_start DATE;
-    SET v_ytd_start = CONCAT(YEAR(CURDATE()), '-01-01');
-    SET v_mtd_start = CONCAT(YEAR(CURDATE()), '-', MONTH(CURDATE()), '-01');
+    DECLARE v_mtd_end DATE;
+
+    IF p_month IS NOT NULL AND p_year IS NOT NULL THEN
+        SET v_ytd_start = CONCAT(p_year, '-01-01');
+        SET v_mtd_start = CONCAT(p_year, '-', p_month, '-01');
+        SET v_mtd_end = LAST_DAY(CONCAT(p_year, '-', p_month, '-01'));
+    ELSE
+        SET v_ytd_start = CONCAT(YEAR(CURDATE()), '-01-01');
+        SET v_mtd_start = CONCAT(YEAR(CURDATE()), '-', MONTH(CURDATE()), '-01');
+        SET v_mtd_end = CURDATE();
+    END IF;
 
     SELECT
         COALESCE(SUM(CASE WHEN cu.used_at >= v_ytd_start THEN 1 ELSE 0 END), 0) AS coupons_ytd_count,
         COALESCE(SUM(CASE WHEN cu.used_at >= v_ytd_start THEN cu.discount_amount ELSE 0 END), 0) AS coupons_ytd_value,
-        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start THEN 1 ELSE 0 END), 0) AS coupons_mtd_count,
-        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start THEN cu.discount_amount ELSE 0 END), 0) AS coupons_mtd_value
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start AND cu.used_at <= v_mtd_end THEN 1 ELSE 0 END), 0) AS coupons_mtd_count,
+        COALESCE(SUM(CASE WHEN cu.used_at >= v_mtd_start AND cu.used_at <= v_mtd_end THEN cu.discount_amount ELSE 0 END), 0) AS coupons_mtd_value
     FROM coupon_usage cu;
 END//
 

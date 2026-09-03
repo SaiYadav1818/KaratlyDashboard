@@ -95,18 +95,23 @@ public class DashboardController {
     }
 
     /**
-     * GET /api/v1/admin/dashboard/mis-overview
+     * GET /api/v1/admin/dashboard/mis-overview?month=&year=
      * Full MIS snapshot: GMV, transaction count, users, metals (gold/silver/diamond), coupons,
      * AUM, watchlist, MDR. Sections without data return null (frontend should hide them):
      *   augmont_commission / safegold_commission / wallet_points_credited / wallet_points_earned
      *   / cashback_redeemed / net_profit / profit_pct
+     *
+     * Optional month/year filter: when provided, MTD/FTD data is scoped to that month.
+     * When omitted, defaults to current month.
      */
     @GetMapping("/mis-overview")
-    public Map<String, Object> misOverview() {
+    public Map<String, Object> misOverview(
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) Integer year) {
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("gmv", repository.misOverview());
-        response.put("aum", repository.misAum());
-        response.put("coupons", repository.misCoupons());
+        response.put("gmv", repository.misOverview(month, year));
+        response.put("aum", repository.misAum(month, year));
+        response.put("coupons", repository.misCoupons(month, year));
         response.put("watchlist", repository.misWatchlist());
         response.put("mdr", Map.of(
             "upi", 0.30,

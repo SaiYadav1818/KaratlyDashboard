@@ -111,7 +111,8 @@ proc: BEGIN
         COALESCE(
             o.failure_reason,
             CASE WHEN o.provider_response_payload IS NOT NULL
-                  AND JSON_EXTRACT(o.provider_response_payload, '$.statusCode') != 200
+                  AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')), '') NOT IN ('', 'null')
+                  AND JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')) <> '200'
                  THEN JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.message'))
                  ELSE NULL END
         ) AS augmont_error,
