@@ -132,42 +132,14 @@ proc: BEGIN
             GROUP BY client_id
         ) o ON cp.client_id = o.client_id
     ) usr ON 1=1
-    -- Metal holdings (gold + silver)
+    -- Metal holdings (NET = bought - sold, live balances from customer_asset_holdings)
     LEFT JOIN (
         SELECT
-            SUM(CASE WHEN COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')),
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')),
-                'gold') = 'gold'
-                AND o.order_status IN ('completed','confirmed')
-                THEN CAST(COALESCE(
-                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
-                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
-                    '0'
-                ) AS DECIMAL(18,4)) ELSE 0 END) AS gold_grams,
-            SUM(CASE WHEN COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')),
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')),
-                'gold') = 'gold'
-                THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS gold_value,
-            SUM(CASE WHEN COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')),
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')),
-                'gold') = 'silver'
-                AND o.order_status IN ('completed','confirmed')
-                THEN CAST(COALESCE(
-                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
-                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
-                    '0'
-                ) AS DECIMAL(18,4)) ELSE 0 END) AS silver_grams,
-            SUM(CASE WHEN COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')),
-                JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')),
-                'gold') = 'silver'
-                THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS silver_value
-        FROM orders o
-        WHERE o.order_type = 'digital_purchase'
-          AND o.created_at >= v_ytd_start
+            SUM(CASE WHEN asset_type = 'gold'   THEN total_quantity ELSE 0 END) AS gold_grams,
+            SUM(CASE WHEN asset_type = 'gold'   THEN COALESCE(valuation_inr, 0) ELSE 0 END) AS gold_value,
+            SUM(CASE WHEN asset_type = 'silver' THEN total_quantity ELSE 0 END) AS silver_grams,
+            SUM(CASE WHEN asset_type = 'silver' THEN COALESCE(valuation_inr, 0) ELSE 0 END) AS silver_value
+        FROM customer_asset_holdings
     ) met ON 1=1
     -- Diamond holdings
     LEFT JOIN (

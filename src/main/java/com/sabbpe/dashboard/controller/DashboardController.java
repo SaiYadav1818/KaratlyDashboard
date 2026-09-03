@@ -125,6 +125,28 @@ public class DashboardController {
         return response;
     }
 
+    /**
+     * GET /api/v1/admin/dashboard/sells?days=7
+     * Sell orders with grams, rate, value.
+     */
+    @GetMapping("/sells")
+    public Map<String, Object> sells(@RequestParam(defaultValue = "7") int days) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sells", repository.sells(days));
+        return response;
+    }
+
+    /**
+     * GET /api/v1/admin/dashboard/redeems?days=7
+     * Redeem orders with grams (via order_items), address, value.
+     */
+    @GetMapping("/redeems")
+    public Map<String, Object> redeems(@RequestParam(defaultValue = "7") int days) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("redeems", repository.redeems(days));
+        return response;
+    }
+
     private String blankToNull(String value) {
         if (value == null || value.isBlank()) {
             return null;

@@ -183,10 +183,8 @@ proc: BEGIN
     WHERE o.order_type = 'digital_purchase'
       AND o.order_status IN ('completed', 'confirmed')
       AND o.provider_response_payload IS NOT NULL
-      AND (
-          JSON_EXTRACT(o.provider_response_payload, '$.statusCode') IS NOT NULL
-          AND JSON_EXTRACT(o.provider_response_payload, '$.statusCode') != 200
-      )
+      AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')), '') NOT IN ('', 'null')
+      AND JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')) <> '200'
       AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
       AND NOT EXISTS (
           SELECT 1 FROM dashboard_alerts a
@@ -236,7 +234,7 @@ proc: BEGIN
       );
 
     -- 10. ZERO_QUANTITY_PURCHASE: buy order completed but quantity = 0
-    --     quantity extraction must ignore empty string AND the literal 'null' string
+    --     quantity extraction: strip both '' and the literal 'null' string
     --     (some Augmont responses store "quantity":"null")
     INSERT INTO dashboard_alerts (category, severity, order_id, client_id, client_name, client_mobile, amount, message)
     SELECT
@@ -248,10 +246,16 @@ proc: BEGIN
     WHERE o.order_type = 'digital_purchase'
       AND o.order_status IN ('completed', 'confirmed')
       AND CAST(COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), 'null'),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), 'null'),
+          NULLIF(
+              NULLIF(
+                  COALESCE(
+                      JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')),
+                      JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity'))
+                  ),
+                  'null'
+              ),
+              ''
+          ),
           '0'
       ) AS DECIMAL(18,4)) = 0
       AND COALESCE(o.total_amount, 0) > 0

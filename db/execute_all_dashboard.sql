@@ -684,7 +684,8 @@ proc: BEGIN
         COALESCE(
             o.failure_reason,
             CASE WHEN o.provider_response_payload IS NOT NULL
-                  AND JSON_EXTRACT(o.provider_response_payload, '$.statusCode') != 200
+                  AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')), '') NOT IN ('', 'null')
+                  AND JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')) <> '200'
                  THEN JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.message'))
                  ELSE NULL END
         ) AS augmont_error,
@@ -926,7 +927,8 @@ proc: BEGIN
     WHERE o.order_type = 'digital_purchase'
       AND o.order_status IN ('completed', 'confirmed')
       AND o.provider_response_payload IS NOT NULL
-      AND (JSON_EXTRACT(o.provider_response_payload, '$.statusCode') IS NOT NULL AND JSON_EXTRACT(o.provider_response_payload, '$.statusCode') != 200)
+      AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')), '') NOT IN ('', 'null')
+      AND JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.statusCode')) <> '200'
       AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
       AND NOT EXISTS (SELECT 1 FROM dashboard_alerts a WHERE a.category = 'AUGMONT_PURCHASE_FAILED' AND a.order_id = o.order_id AND a.status IN ('open','acknowledged'));
 
@@ -961,10 +963,16 @@ proc: BEGIN
     WHERE o.order_type = 'digital_purchase'
       AND o.order_status IN ('completed', 'confirmed')
       AND CAST(COALESCE(
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), 'null'),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), 'null'),
+          NULLIF(
+              NULLIF(
+                  COALESCE(
+                      JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')),
+                      JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity'))
+                  ),
+                  'null'
+              ),
+              ''
+          ),
           '0'
       ) AS DECIMAL(18,4)) = 0
       AND COALESCE(o.total_amount, 0) > 0
@@ -1113,11 +1121,11 @@ proc: BEGIN
     ) usr ON 1=1
     LEFT JOIN (
         SELECT
-            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'gold' AND o.order_status IN ('completed','confirmed') THEN CAST(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''), '0') AS DECIMAL(18,4)) ELSE 0 END) AS gold_grams,
-            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'gold' THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS gold_value,
-            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'silver' AND o.order_status IN ('completed','confirmed') THEN CAST(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity')), ''), '0') AS DECIMAL(18,4)) ELSE 0 END) AS silver_grams,
-            SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') = 'silver' THEN COALESCE(o.total_amount, 0) ELSE 0 END) AS silver_value
-        FROM orders o WHERE o.order_type = 'digital_purchase' AND o.created_at >= v_ytd_start
+            SUM(CASE WHEN asset_type = 'gold'   THEN total_quantity ELSE 0 END) AS gold_grams,
+            SUM(CASE WHEN asset_type = 'gold'   THEN COALESCE(valuation_inr, 0) ELSE 0 END) AS gold_value,
+            SUM(CASE WHEN asset_type = 'silver' THEN total_quantity ELSE 0 END) AS silver_grams,
+            SUM(CASE WHEN asset_type = 'silver' THEN COALESCE(valuation_inr, 0) ELSE 0 END) AS silver_value
+        FROM customer_asset_holdings
     ) met ON 1=1
     LEFT JOIN (
         SELECT COUNT(*) AS diamond_count, COALESCE(SUM(o.total_amount), 0) AS diamond_value, COALESCE(SUM(di.weight), 0) AS diamond_carats
@@ -1226,6 +1234,90 @@ proc: BEGIN
              SELECT 'gold' AS metal UNION SELECT 'silver' UNION SELECT 'platinum' UNION SELECT 'pearl' UNION SELECT 'diamond'
          ) allmetals
          WHERE metal NOT IN (SELECT metal FROM volumes WHERE grams > 0)) AS zero_volume_metals;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_sells//
+
+CREATE PROCEDURE sp_dashboard_sells(IN p_days INT)
+proc: BEGIN
+    DECLARE v_since DATE;
+    SET v_since = DATE_SUB(CURDATE(), INTERVAL p_days DAY);
+
+    SELECT
+        o.order_id,
+        o.order_reference,
+        o.merchant_transaction_id,
+        o.client_id,
+        cp.full_name AS client_name,
+        cp.mobile    AS client_mobile,
+        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.metalType')), JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.assetType')), 'gold') AS metal_type,
+        o.order_status,
+        CAST(COALESCE(
+            NULLIF(
+                NULLIF(
+                    COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.quantity')),
+                        JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.quantity'))
+                    ),
+                    'null'
+                ),
+                ''
+            ),
+            '0'
+        ) AS DECIMAL(18,6)) AS sold_grams,
+        JSON_UNQUOTE(JSON_EXTRACT(o.pricing_snapshot, '$.pricePerUnit')) AS rate_per_gram,
+        COALESCE(o.total_amount, 0) AS sell_value,
+        UPPER(COALESCE(pt.payment_status, cfp.payment_status, 'PENDING')) AS payment_status,
+        CASE WHEN cfo.id IS NOT NULL THEN 'CASHFREE' ELSE 'EASEBUZZ' END AS payment_gateway,
+        o.provider_reference AS provider_txn_id,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.goldBalance')) AS gold_balance_after,
+        JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload, '$.result.data.silverBalance')) AS silver_balance_after,
+        DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS order_date
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+    LEFT JOIN cashfreepg_orders    cfo ON cfo.merchant_order_id = o.merchant_transaction_id
+    LEFT JOIN cashfreepg_payments  cfp ON cfp.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE o.order_type = 'digital_sell'
+      AND o.created_at >= v_since
+    ORDER BY o.created_at DESC;
+END//
+
+DROP PROCEDURE IF EXISTS sp_dashboard_redeems//
+
+CREATE PROCEDURE sp_dashboard_redeems(IN p_days INT)
+proc: BEGIN
+    DECLARE v_since DATE;
+    SET v_since = DATE_SUB(CURDATE(), INTERVAL p_days DAY);
+
+    SELECT
+        o.order_id,
+        o.order_reference,
+        o.client_id,
+        cp.full_name AS client_name,
+        cp.mobile    AS client_mobile,
+        o.order_status,
+        COALESCE(NULLIF(oi.asset_type, 'product'), i.metal_type, 'product') AS metal_type,
+        oi.provider_sku,
+        oi.quantity  AS item_grams,
+        oi.unit,
+        i.weight     AS product_weight_grams,
+        oi.price_per_unit AS live_rate,
+        COALESCE(oi.total_price, 0) AS item_value,
+        COALESCE(o.total_amount, 0)      AS order_value,
+        COALESCE(o.subtotal_amount, 0)   AS metal_value,
+        COALESCE(o.shipping_amount, 0)   AS shipping_value,
+        JSON_UNQUOTE(JSON_EXTRACT(o.shipping_address, '$.addressId')) AS address_id,
+        o.shipping_address AS shipping_address,
+        o.provider_reference AS provider_txn_id,
+        DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS order_date
+    FROM orders o
+    JOIN client_profile cp ON o.client_id = cp.client_id
+    LEFT JOIN order_items oi ON oi.order_id = o.order_id
+    LEFT JOIN items i       ON i.provider_sku = oi.provider_sku
+    WHERE o.order_type = 'physical_redemption'
+      AND o.created_at >= v_since
+    ORDER BY o.created_at DESC;
 END//
 
 DELIMITER ;

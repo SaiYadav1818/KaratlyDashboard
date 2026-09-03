@@ -242,6 +242,34 @@
               "path": ["api", "v1", "admin", "dashboard", "mis-overview"]
             }
           }
+        },
+        {
+          "name": "Sell Orders",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/sells?days=7",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "sells"],
+              "query": [
+                { "key": "days", "value": "7" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Redeem Orders",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dashboard/redeems?days=7",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "dashboard", "redeems"],
+              "query": [
+                { "key": "days", "value": "7" }
+              ]
+            }
+          }
         }
       ]
     },
