@@ -1,6 +1,7 @@
 package com.sabbpe.dashboard.controller;
 
 import com.sabbpe.dashboard.repository.DashboardRepository;
+import com.sabbpe.dashboard.service.SabbpeBackendService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -11,9 +12,11 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardRepository repository;
+    private final SabbpeBackendService sabbpeBackend;
 
-    public DashboardController(DashboardRepository repository) {
+    public DashboardController(DashboardRepository repository, SabbpeBackendService sabbpeBackend) {
         this.repository = repository;
+        this.sabbpeBackend = sabbpeBackend;
     }
 
     /**
@@ -149,6 +152,57 @@ public class DashboardController {
     public Map<String, Object> redeems(@RequestParam(defaultValue = "7") int days) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("redeems", repository.redeems(days));
+        return response;
+    }
+
+    /**
+     * POST /api/v1/admin/dashboard/rates/live
+     * Fetch current live rates from Augmont via sabbpegold backend.
+     */
+    @PostMapping("/rates/live")
+    public Map<String, Object> liveRates() {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("rates", sabbpeBackend.fetchLiveRates());
+        return response;
+    }
+
+    /**
+     * POST /api/v1/admin/dashboard/buy/create
+     * Manually trigger a gold/silver buy at Augmont via sabbpegold backend.
+     */
+    @PostMapping("/buy/create")
+    public Map<String, Object> createBuy(@RequestBody Map<String, Object> buyRequest) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("result", sabbpeBackend.createBuyOrder(buyRequest));
+        return response;
+    }
+
+    /**
+     * POST /api/v1/admin/dashboard/search
+     * Search by name, phone, email, or uniqueId.
+     * Returns profile + all orders + cashfree payments + gold_received flag.
+     */
+    @PostMapping("/search")
+    public Map<String, Object> searchUser(@RequestBody Map<String, String> request) {
+        String term = request.getOrDefault("term", "").trim();
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("clients", repository.searchClients(term));
+        response.put("cashfree_payments", repository.searchCashfreePayments(term));
+        return response;
+    }
+
+    /**
+     * POST /api/v1/admin/dashboard/unfulfilled-cashfree
+     * Users who paid on Cashfree (SUCCESS) but gold was never purchased.
+     */
+    @PostMapping("/unfulfilled-cashfree")
+    public Map<String, Object> unfulfilledCashfree(@RequestBody(required = false) Map<String, Object> request) {
+        int days = (request != null && request.get("days") != null)
+                ? ((Number) request.get("days")).intValue() : 90;
+        String status = (request != null && request.get("status") != null)
+                ? String.valueOf(request.get("status")).toUpperCase() : "ALL";
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("orders", repository.unfulfilledCashfree(days, status));
         return response;
     }
 
