@@ -15,13 +15,13 @@ public class GoldFulfillmentController {
         this.service = service;
     }
 
-    public record CreateRequest(long adminId, String uniqueId, String level1Note) {}
+    public record CreateRequest(Long adminId, String uniqueId, String level1Note) {}
 
-    public record PendingRequest(long adminId) {}
+    public record PendingRequest(Long adminId) {}
 
-    public record LookupRequest(long adminId, String uniqueId) {}
+    public record LookupRequest(Long adminId, String uniqueId) {}
 
-    public record RetryRequest(long adminId, String note) {}
+    public record RetryRequest(Long adminId, String note) {}
 
     /**
      * POST /api/v1/admin/fulfillment/create

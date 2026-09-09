@@ -25,7 +25,7 @@ public class GoldFulfillmentService {
     }
 
     public Map<String, Object> createRequest(String adminId, String uniqueId, String note) {
-        long adminIdLong = Long.parseLong(adminId);
+        long adminIdLong = safeAdminId(adminId);
         if (uniqueId == null || uniqueId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "uniqueId is required");
         }
@@ -41,6 +41,17 @@ public class GoldFulfillmentService {
         result.put("request", created);
         result.put("message", "Request sent to Level 2 admin");
         return result;
+    }
+
+    private long safeAdminId(String adminId) {
+        if (adminId == null || adminId.isBlank() || "null".equalsIgnoreCase(adminId)) {
+            return 1L;
+        }
+        try {
+            return Long.parseLong(adminId.trim());
+        } catch (NumberFormatException e) {
+            return 1L;
+        }
     }
 
     public Map<String, Object> lookupByUniqueId(String adminId, String uniqueId) {
@@ -86,23 +97,25 @@ public class GoldFulfillmentService {
         log.info("Live rates response: {}", liveRates);
 
         // 3. Extract lockPrice and blockId from live rates
+        // payload.result.data.rates.{gBuy|sBuy} and payload.result.data.blockId
         String lockPrice = "";
         String blockId = "";
         try {
-            Object payload = liveRates.get("payload");
-            if (payload instanceof Map<?, ?> payloadMap) {
-                // Try to get gold buy rate
-                Object goldBuy = payloadMap.get("goldBuy");
-                if (goldBuy instanceof Map<?, ?> goldBuyMap) {
-                    lockPrice = String.valueOf(goldBuyMap.get("lockPrice"));
-                    blockId = String.valueOf(goldBuyMap.get("blockId"));
-                }
-                // If silver, try silverBuy
-                if ("silver".equalsIgnoreCase(metalType)) {
-                    Object silverBuy = payloadMap.get("silverBuy");
-                    if (silverBuy instanceof Map<?, ?> silverBuyMap) {
-                        lockPrice = String.valueOf(silverBuyMap.get("lockPrice"));
-                        blockId = String.valueOf(silverBuyMap.get("blockId"));
+            Object payloadObj = liveRates.get("payload");
+            if (payloadObj instanceof Map<?, ?> payloadMap) {
+                Object resultObj = payloadMap.get("result");
+                if (resultObj instanceof Map<?, ?> resultMap) {
+                    Object dataObj = resultMap.get("data");
+                    if (dataObj instanceof Map<?, ?> dataMap) {
+                        blockId = String.valueOf(dataMap.get("blockId"));
+                        Object ratesObj = dataMap.get("rates");
+                        if (ratesObj instanceof Map<?, ?> ratesMap) {
+                            if ("silver".equalsIgnoreCase(metalType)) {
+                                lockPrice = String.valueOf(ratesMap.get("sBuy"));
+                            } else {
+                                lockPrice = String.valueOf(ratesMap.get("gBuy"));
+                            }
+                        }
                     }
                 }
             }
@@ -113,19 +126,33 @@ public class GoldFulfillmentService {
         // 4. Increment retry count
         repository.incrementRetryCount(requestId);
 
-        // 5. Call Sabbpegold's buy endpoint with live rate
+        // 5. Call Sabbpegold's buy endpoint with live rate (wrapper format)
+        Map<String, Object> innerRequest = new LinkedHashMap<>();
+        innerRequest.put("lockPrice", lockPrice);
+        innerRequest.put("metalType", metalType);
+        innerRequest.put("quantity", null);
+        innerRequest.put("amount", String.valueOf(orderAmount));
+        innerRequest.put("merchantTransactionId", merchantOrderId);
+        innerRequest.put("uniqueId", customerId);
+        innerRequest.put("phoneNumber", customerMobile);
+        innerRequest.put("blockId", blockId);
+        innerRequest.put("modeOfPayment", "CASHFREE");
+        innerRequest.put("referenceType", null);
+        innerRequest.put("referenceId", null);
+        innerRequest.put("utmSource", null);
+        innerRequest.put("utmMedium", null);
+        innerRequest.put("utmCampaign", null);
+        innerRequest.put("emailId", null);
+        innerRequest.put("userName", null);
+        innerRequest.put("userAddress", null);
+        innerRequest.put("userCity", null);
+        innerRequest.put("userState", null);
+        innerRequest.put("userPincode", null);
+        innerRequest.put("mobileNumber", customerMobile);
+
         Map<String, Object> buyRequest = new LinkedHashMap<>();
-        buyRequest.put("lockPrice", lockPrice);
-        buyRequest.put("metalType", metalType);
-        buyRequest.put("quantity", null);
-        buyRequest.put("amount", String.valueOf(orderAmount));
-        buyRequest.put("merchantTransactionId", merchantOrderId);
-        buyRequest.put("uniqueId", customerId);
-        buyRequest.put("phoneNumber", customerMobile);
-        buyRequest.put("blockId", blockId);
-        buyRequest.put("modeOfPayment", "CASHFREE");
-        buyRequest.put("userName", null);
-        buyRequest.put("mobileNumber", customerMobile);
+        buyRequest.put("merchantId", merchantOrderId);
+        buyRequest.put("request", innerRequest);
 
         log.info("Retry buy request: {}", buyRequest);
         Map<String, Object> buyResponse = sabbpeBackendService.createBuyOrder(buyRequest);
@@ -133,7 +160,8 @@ public class GoldFulfillmentService {
 
         // 6. Check if buy was successful
         String buyStatus = String.valueOf(buyResponse.getOrDefault("status", ""));
-        boolean success = "SUCCESS".equals(buyStatus);
+        boolean success = "success".equalsIgnoreCase(buyStatus)
+                || "SUCCESS".equalsIgnoreCase(buyStatus);
 
         // 7. If buy succeeded, mark the cashfree order as fulfilled so it stops showing as unfulfilled
         if (success) {

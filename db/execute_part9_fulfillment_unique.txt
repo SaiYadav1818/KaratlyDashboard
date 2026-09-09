@@ -152,7 +152,7 @@ BEGIN
         r.level2_note,
         r.retry_count,
         DATE_FORMAT(r.last_retry_at, '%Y-%m-%d %H:%i:%s') AS last_retry_at,
-        cr.fullName AS created_by_name,
+        cr.full_name AS created_by_name,
         DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
     FROM gold_fulfillment_requests r
@@ -187,7 +187,7 @@ BEGIN
         r.level2_note,
         r.retry_count,
         DATE_FORMAT(r.last_retry_at, '%Y-%m-%d %H:%i:%s') AS last_retry_at,
-        a.fullName AS assigned_to_name,
+        a.full_name AS assigned_to_name,
         DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
     FROM gold_fulfillment_requests r

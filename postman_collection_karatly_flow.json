@@ -1,0 +1,225 @@
+{
+	"info": {
+		"name": "Karatly Dashboard — Fulfillment Flow",
+		"description": "Complete flow: L1 sees unfulfilled → L1 sends request (uniqueId) → L2 sees details → L2 lookup → L2 retry buy (live rate)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8082"
+		},
+		{
+			"key": "admin1",
+			"value": "7"
+		},
+		{
+			"key": "admin2",
+			"value": "7"
+		},
+		{
+			"key": "uniqueId",
+			"value": "995875001313121985"
+		},
+		{
+			"key": "request_id",
+			"value": "1"
+		}
+	],
+	"item": [
+		{
+			"name": "STEP 1 — Login Level 1 (get adminId)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var json = pm.response.json();",
+							"if (json.success) { pm.collectionVariables.set('admin1', json.admin.id); }"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/auth/login",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"phoneNumber\": \"8888888888\",\n  \"password\": \"admin@123\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 2 — Login Level 2 (get adminId)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var json = pm.response.json();",
+							"if (json.success) { pm.collectionVariables.set('admin2', json.admin.id); }"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/auth/login",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"phoneNumber\": \"9999999999\",\n  \"password\": \"admin@123\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 3 — [Level 1] Paid but NO gold (unfulfilled)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var json = pm.response.json();",
+							"if (json.orders && json.orders.length > 0) {",
+							"    pm.collectionVariables.set('uniqueId', json.orders[0].customer_id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/dashboard/unfulfilled-cashfree",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"days\": 90,\n  \"status\": \"ALL\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 4 — [Level 1] Lookup uniqueId (see full details before sending)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/lookup-unique",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": {{admin1}},\n  \"uniqueId\": \"{{uniqueId}}\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 5 — [Level 1] Send request to Level 2 (only uniqueId)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var json = pm.response.json();",
+							"if (json.request_id) { pm.collectionVariables.set('request_id', json.request_id); }"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/create",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": {{admin1}},\n  \"uniqueId\": \"{{uniqueId}}\",\n  \"level1Note\": \"Customer paid but gold not received. Please check and retry.\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 6 — [Level 2] See pending requests",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/pending",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": {{admin2}}\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 7 — [Level 2] Lookup uniqueId (verify details + merchant id + augmont msg)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/lookup-unique",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": {{admin2}},\n  \"uniqueId\": \"{{uniqueId}}\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "STEP 8 — [Level 2] Retry buy (live rate)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/{{request_id}}/retry-buy",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": {{admin2}},\n  \"note\": \"Retrying buy with live rate\"\n}"
+				}
+			},
+			"response": []
+		}
+	]
+}
