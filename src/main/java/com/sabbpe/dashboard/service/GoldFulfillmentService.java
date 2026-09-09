@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class GoldFulfillmentService {
@@ -78,22 +79,68 @@ public class GoldFulfillmentService {
         Map<String, Object> request = body.get("request") instanceof Map<?, ?> value
                 ? castMap(value) : Map.of();
         String merchantTransactionId = text(request.get("merchantTransactionId"));
-        if (!merchantTransactionId.isBlank()) {
-            String responseJson = toJson(buyResponse);
-            String providerReference = extractTransactionId(buyResponse);
-            boolean successful = isSuccessfulBuy(buyResponse, providerReference);
-            if (successful) {
-                repository.saveAugmontResult(merchantTransactionId, responseJson,
-                        true, providerReference, null);
-                markCashfreeCompleted(merchantTransactionId);
-            } else {
-                String failure = text(buyResponse.getOrDefault("message", "Augmont buy failed"));
-                repository.saveAugmontResult(merchantTransactionId, responseJson,
-                        false, null, failure);
-                repository.markCashfreeOrderFailedByMerchant(merchantTransactionId, failure);
+
+        // Augmont reserves merchantTransactionId values. If an old failed attempt
+        // used this ID, retry with a new ID while keeping the original local order.
+        if (isDuplicateMerchantTransaction(buyResponse) && !merchantTransactionId.isBlank()) {
+            Map<String, Object> existingBuy = sabbpeBackendService.fetchBuyDetail(
+                    merchantTransactionId, text(request.get("uniqueId")));
+            if (isSuccessfulBuyResponse(existingBuy)) {
+                Map<String, Object> result = persistAugmontResult(merchantTransactionId, existingBuy);
+                result.put("existing_merchant_transaction_id", merchantTransactionId);
+                return result;
+            }
+
+            String retryMerchantTransactionId = merchantTransactionId + "-R"
+                    + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+            Map<String, Object> retryBody = new LinkedHashMap<>(body);
+            Map<String, Object> retryRequest = new LinkedHashMap<>(request);
+            retryRequest.put("merchantTransactionId", retryMerchantTransactionId);
+            retryBody.put("merchantId", retryMerchantTransactionId);
+            retryBody.put("request", retryRequest);
+            buyResponse = sabbpeBackendService.createBuyOrder(retryBody);
+
+            if (isSuccessfulBuyResponse(buyResponse)) {
+                Map<String, Object> result = persistAugmontResult(
+                        merchantTransactionId, buyResponse);
+                result.put("retry_merchant_transaction_id", retryMerchantTransactionId);
+                return result;
             }
         }
+
+        if (!merchantTransactionId.isBlank()) {
+            return persistAugmontResult(merchantTransactionId, buyResponse);
+        }
         return buyResponse;
+    }
+
+    private Map<String, Object> persistAugmontResult(String merchantTransactionId,
+                                                       Map<String, Object> buyResponse) {
+        String responseJson = toJson(buyResponse);
+        String providerReference = extractTransactionId(buyResponse);
+        boolean successful = isSuccessfulBuy(buyResponse, providerReference);
+        if (successful) {
+            repository.saveAugmontResult(merchantTransactionId, responseJson,
+                    true, providerReference, null);
+            markCashfreeCompleted(merchantTransactionId);
+        } else {
+            String failure = text(buyResponse.getOrDefault("message", "Augmont buy failed"));
+            repository.saveAugmontResult(merchantTransactionId, responseJson,
+                    false, null, failure);
+            repository.markCashfreeOrderFailedByMerchant(merchantTransactionId, failure);
+        }
+        return buyResponse;
+    }
+
+    private boolean isDuplicateMerchantTransaction(Map<String, Object> response) {
+        String message = text(response.get("message")).toLowerCase();
+        return message.contains("4327")
+                || message.contains("merchant transaction id has already been taken");
+    }
+
+    private boolean isSuccessfulBuyResponse(Map<String, Object> response) {
+        String transactionId = extractTransactionId(response);
+        return isSuccessfulBuy(response, transactionId);
     }
 
     @SuppressWarnings("unchecked")

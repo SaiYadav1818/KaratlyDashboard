@@ -54,4 +54,22 @@ public class SabbpeBackendService {
             return Map.of("status", "FAILED", "message", ex.getMessage());
         }
     }
+
+    public Map<String, Object> fetchBuyDetail(String merchantTransactionId, String uniqueId) {
+        String url = baseUrl + "/api/v1/orders/buy/detail";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        Map<String, Object> body = Map.of(
+                "merchantId", merchantTransactionId,
+                "merchantTransactionId", merchantTransactionId,
+                "uniqueId", uniqueId);
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+            return response.getBody() != null ? response.getBody() : Map.of();
+        } catch (Exception ex) {
+            log.warn("Sabbpe buy detail lookup failed for {}", merchantTransactionId, ex);
+            return Map.of("status", "FAILED", "message", ex.getMessage());
+        }
+    }
 }

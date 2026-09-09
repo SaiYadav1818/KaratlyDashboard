@@ -15,7 +15,11 @@ BEGIN
         cf.customer_name,
         cf.customer_mobile,
         cf.order_amount,
-        cf.order_status,
+        cf.order_status                                      AS cashfree_order_status,
+        o.order_status                                       AS order_status,
+        o.provider_reference                                 AS augmont_transaction_id,
+        o.provider_response_payload                          AS augmont_response,
+        o.failure_reason                                     AS augmont_failure_reason,
         cf.remarks                                           AS fulfillment_status,
         p.payment_status,
         p.cf_payment_id,
@@ -57,6 +61,7 @@ BEGIN
     FROM cashfreepg_orders cf
     LEFT JOIN cashfreepg_payments p  ON p.sabbpe_order_id = cf.sabbpe_order_id
     LEFT JOIN client_profile cp      ON cp.provider_client_reference = cf.customer_id
+    LEFT JOIN orders o                ON o.merchant_transaction_id = cf.merchant_order_id
     WHERE UPPER(p.payment_status) = 'SUCCESS'
       AND COALESCE(cf.remarks, '') NOT LIKE 'FULFILLMENT_COMPLETED'
       AND cf.created_at >= DATE_SUB(NOW(), INTERVAL p_days DAY)
