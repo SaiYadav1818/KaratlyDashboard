@@ -1,5 +1,5 @@
 com\sabbpe\dashboard\config\CorsConfig.class
-com\sabbpe\dashboard\controller\GoldFulfillmentController$RetryRequest.class
+com\sabbpe\dashboard\controller\AlertController$AdminActionRequest.class
 com\sabbpe\dashboard\config\GlobalExceptionHandler.class
 com\sabbpe\dashboard\controller\AuthController$LoginRequest.class
 com\sabbpe\dashboard\controller\GoldFulfillmentController$PendingRequest.class
@@ -13,6 +13,7 @@ com\sabbpe\dashboard\repository\GoldFulfillmentRepository.class
 com\sabbpe\dashboard\filter\ApiRequestResponseLoggingFilter.class
 com\sabbpe\dashboard\service\GoldFulfillmentService.class
 com\sabbpe\dashboard\repository\AlertRepository.class
+com\sabbpe\dashboard\controller\GoldFulfillmentController$LookupRequest.class
 com\sabbpe\dashboard\controller\GoldFulfillmentController$CreateRequest.class
 com\sabbpe\dashboard\controller\GoldFulfillmentController.class
 com\sabbpe\dashboard\controller\AuthController.class

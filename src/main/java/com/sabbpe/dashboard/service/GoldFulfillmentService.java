@@ -1,6 +1,8 @@
 package com.sabbpe.dashboard.service;
 
 import com.sabbpe.dashboard.repository.GoldFulfillmentRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -17,6 +19,7 @@ public class GoldFulfillmentService {
 
     private final GoldFulfillmentRepository repository;
     private final SabbpeBackendService sabbpeBackendService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public GoldFulfillmentService(GoldFulfillmentRepository repository,
                                    SabbpeBackendService sabbpeBackendService) {
@@ -69,15 +72,69 @@ public class GoldFulfillmentService {
         return result;
     }
 
-    /**
-     * Proxy retry-buy: forwards the exact request body that
-     * https://uatbckend.karatly.net/api/v1/orders/buy/create expects.
-     * The dashboard does NOT build the buy request — caller sends it.
-     * Only call to sabbpe backend + return its response.
-     */
     public Map<String, Object> retryBuy(Map<String, Object> body) {
         Map<String, Object> buyResponse = sabbpeBackendService.createBuyOrder(body);
+
+        Map<String, Object> request = body.get("request") instanceof Map<?, ?> value
+                ? castMap(value) : Map.of();
+        String merchantTransactionId = text(request.get("merchantTransactionId"));
+        if (!merchantTransactionId.isBlank()) {
+            String responseJson = toJson(buyResponse);
+            String providerReference = extractTransactionId(buyResponse);
+            boolean successful = isSuccessfulBuy(buyResponse, providerReference);
+            if (successful) {
+                repository.saveAugmontResult(merchantTransactionId, responseJson,
+                        true, providerReference, null);
+                markCashfreeCompleted(merchantTransactionId);
+            } else {
+                String failure = text(buyResponse.getOrDefault("message", "Augmont buy failed"));
+                repository.saveAugmontResult(merchantTransactionId, responseJson,
+                        false, null, failure);
+                repository.markCashfreeOrderFailedByMerchant(merchantTransactionId, failure);
+            }
+        }
         return buyResponse;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Map<?, ?> value) {
+        return (Map<String, Object>) value;
+    }
+
+    private boolean isSuccessfulBuy(Map<String, Object> response, String transactionId) {
+        Object payload = response.get("payload");
+        Object statusCode = payload instanceof Map<?, ?> map ? map.get("statusCode") : null;
+        String message = payload instanceof Map<?, ?> map ? text(map.get("message")) : "";
+        return "success".equalsIgnoreCase(text(response.get("status")))
+                && ("200".equals(String.valueOf(statusCode))
+                    || message.toLowerCase().contains("successfully bought"))
+                && !transactionId.isBlank();
+    }
+
+    private String extractTransactionId(Map<String, Object> response) {
+        Object payload = response.get("payload");
+        if (!(payload instanceof Map<?, ?> payloadMap)) return "";
+        Object result = payloadMap.get("result");
+        if (!(result instanceof Map<?, ?> resultMap)) return "";
+        Object data = resultMap.get("data");
+        if (!(data instanceof Map<?, ?> dataMap)) return "";
+        return text(dataMap.get("transactionId"));
+    }
+
+    private void markCashfreeCompleted(String merchantTransactionId) {
+        repository.markCashfreeOrderFulfilledByMerchant(merchantTransactionId);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            return String.valueOf(value);
+        }
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     /**

@@ -1,59 +1,81 @@
-# Prompt for Frontend Team — Level 2 Retry Buy
+# Prompt for Frontend Team — Level 2 Retry Buy (Proxy)
 
-## IMPORTANT
-When Level 2 admin clicks "Retry Buy", the frontend calls ONLY ONE dashboard API:
+## IMPORTANT — What to call
+When Level 2 admin clicks "Retry Buy", frontend calls ONLY ONE dashboard API:
 
 ```
-POST http://localhost:8082/api/v1/admin/fulfillment/{request_id}/retry-buy
-```
-
-You do NOT call uatbckend.karatly.net directly.
-You do NOT call Augmont directly.
-You do NOT pass live rate / lockPrice / blockId / merchantId manually.
-
-The backend automatically:
-1. Fetches LIVE RATE from uatbckend.karatly.net
-2. Picks lockPrice (gBuy for gold / sBuy for silver) + blockId from the live rate
-3. Calls uatbckend buy/create with the correct wrapper format
-4. Marks request PROCESSED (success) or REJECTED (failure)
-
-## Request (Level 2 admin clicks Retry)
-```
-POST /api/v1/admin/fulfillment/1/retry-buy
+POST http://localhost:8082/api/v1/admin/fulfillment/retry-buy
 Content-Type: application/json
 ```
+
+You do **NOT** call uatbckend.karatly.net directly.
+You do **NOT** call Augmont directly.
+
+The dashboard API is a **pure proxy**: it forwards your body to
+`https://uatbckend.karatly.net/api/v1/orders/buy/create` and returns the response.
+
+---
+
+## What you give in the request
+
+You pass the full buy request (the exact format buy/create wants).
+
 ```json
 {
-  "adminId": 7,
-  "note": "Retrying buy with live rate"
+  "merchantId": "KARATLY-CF-20260909102322182-71020400",
+  "request": {
+    "lockPrice": "15964.93",
+    "metalType": "gold",
+    "quantity": null,
+    "amount": "103.00",
+    "merchantTransactionId": "KARATLY-CF-20260909102322182-71020400",
+    "uniqueId": "995875001313121985",
+    "phoneNumber": "7989019142",
+    "blockId": "Xeaa3EQX",
+    "modeOfPayment": "CASHFREE",
+    "mobileNumber": "7989019142"
+  }
 }
 ```
 
-## Response — SUCCESS
+### Field source
+| Field | Source |
+|-------|--------|
+| `merchantId` | `merchant_order_id` from pending request |
+| `request.lockPrice` | live gold/silver buy rate (gBuy/sBuy) — frontend fetches from `/api/v1/rates/live` & picks gBuy/sBuy |
+| `request.blockId` | live rate `blockId` |
+| `request.metalType` | `gold` / `silver` |
+| `request.quantity` | null (buy by amount) |
+| `request.amount` | `order_amount` from pending request |
+| `request.merchantTransactionId` | `merchant_order_id` from pending request |
+| `request.uniqueId` | `customer_id` from pending request |
+| `request.phoneNumber` / `mobileNumber` | `customer_mobile` from pending request |
+| `request.modeOfPayment` | `CASHFREE` |
+
+---
+
+## Response — SUCCESS (buy/create result)
 ```json
 {
-  "success": true,
-  "request": {
-    "id": 1,
-    "sabbpe_order_id": "Karatly2026090910232282c851",
-    "customer_id": "995875001313121985",
-    "customer_name": "Sai",
-    "customer_mobile": "7989019142",
-    "order_amount": 103.00,
-    "lock_price": "15257.84",
-    "block_id": "BLOCK_ID",
-    "metal_type": "gold",
-    "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
-    "status": "PROCESSED",
-    "level2_note": "Retrying buy with live rate",
-    "retry_count": 1,
-    "last_retry_at": "2026-09-09 11:07:18"
-  },
-  "sabbpe_order_id": "Karatly2026090910232282c851",
-  "live_rate_used": "15940.49",
-  "buy_response": {
-    "status": "success",
-    "payload": { "...Augmont buy result..." }
+  "operation": "createBuyOrder",
+  "status": "success",
+  "payload": {
+    "statusCode": 200,
+    "message": "Successfully bought 0.0062 grams of gold @ 15951.83",
+    "result": {
+      "data": {
+        "quantity": "0.0062",
+        "totalAmount": "103.00",
+        "metalType": "gold",
+        "rate": "15951.83",
+        "uniqueId": "995875001313121985",
+        "transactionId": "Y9253717889329389050281213",
+        "merchantTransactionId": "KARATLY-CF-20260909102322182-71020400",
+        "goldBalance": "1.0530",
+        "taxes": { "totalTaxAmount": "3.00" },
+        "invoiceNumber": "GY90927331270"
+      }
+    }
   }
 }
 ```
@@ -61,42 +83,43 @@ Content-Type: application/json
 ## Response — FAILURE
 ```json
 {
-  "success": false,
-  "request": {
-    "id": 1,
-    "status": "REJECTED",
-    "retry_count": 1,
-    "last_retry_at": "2026-09-09 11:07:18"
-  },
-  "sabbpe_order_id": "Karatly2026090910232282c851",
-  "live_rate_used": "",
-  "buy_response": {
-    "status": "FAILED",
-    "message": "400 Bad Request: Augmont request validation failed"
-  }
+  "status": "FAILED",
+  "message": "400 Bad Request: Augmont request validation failed"
+}
+```
+(or the error from uatbckend, e.g. `{"status":500,"error":"..."}`)
+
+---
+
+## How to detect success in UI
+```js
+const data = await response.json();
+const ok = data && (data.status === "success" || data.payload?.statusCode === 200);
+if (ok) {
+    // show success: message (e.g. "Successfully bought 0.0062 grams")
+} else {
+    // show failure: message from data.message or data.error
 }
 ```
 
-## IMPORTANT for UI
-- HTTP status is ALWAYS 200 — check the `success` field:
-```js
-if (data.success === true) {
-    // show green badge PROCESSED
-    // option: show live_rate_used to admin
-} else {
-    // show red badge REJECTED
-    // show data.buy_response.message to admin
-}
-```
+---
 
 ## UI flow on Level 2 dashboard
 1. Level 2 sees pending request → click "Retry Buy"
-2. Optional confirm modal (show amount + customer + note field)
-3. Call the retry endpoint above
-4. On success → refresh pending list → request no longer PENDING
-5. On failure → show error from `buy_response.message`
+2. Frontend fetches live rate → fills `lockPrice` + `blockId` (or backend does it — choose ONE)
+   - Option A (recommended, no extra call): backend fills live rate
+   - Option B (frontend): call `POST /api/v1/rates/live` on uatbckend first, use `payload.result.data.rates.gBuy`/`sBuy` + `blockId`, then call retry-buy
+3. Frontend builds body above from pending request + live rate
+4. Call `POST /api/v1/admin/fulfillment/retry-buy`
+5. Show success/failure from response
 
-## request_id source
-`request_id` comes from:
-- `POST /api/v1/admin/fulfillment/pending` → response `requests[].id`
-- or `POST /api/v1/admin/fulfillment/create` → response `request_id`
+---
+
+## Backend proxy definition (for reference)
+```java
+// Dashboard GoldFulfillmentController
+@PostMapping("/retry-buy")
+public Map<String, Object> retryBuy(@RequestBody Map<String, Object> body) {
+    return service.retryBuy(body);   // forwards body to uatbckend buy/create
+}
+```

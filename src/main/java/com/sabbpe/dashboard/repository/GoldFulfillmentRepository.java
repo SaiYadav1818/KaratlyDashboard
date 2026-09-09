@@ -90,4 +90,42 @@ public class GoldFulfillmentRepository {
                 "UPDATE cashfreepg_orders SET remarks = 'FULFILLMENT_COMPLETED' WHERE sabbpe_order_id = ?",
                 sabbpeOrderId);
     }
+
+    public void markCashfreeOrderFulfilledByMerchant(String merchantTransactionId) {
+        jdbc.update(
+                "UPDATE cashfreepg_orders SET remarks = 'FULFILLMENT_COMPLETED' WHERE merchant_order_id = ?",
+                merchantTransactionId);
+    }
+
+    public void saveAugmontResult(String merchantTransactionId, String responseJson,
+                                  boolean successful, String providerReference, String failureReason) {
+        if (successful) {
+            jdbc.update("""
+                    UPDATE orders
+                    SET order_status = 'completed',
+                        provider_reference = ?,
+                        provider_response_payload = ?,
+                        failure_reason = NULL
+                    WHERE merchant_transaction_id = ?
+                    """, providerReference, responseJson, merchantTransactionId);
+        } else {
+            jdbc.update("""
+                    UPDATE orders
+                    SET order_status = 'failed',
+                        provider_response_payload = ?,
+                        failure_reason = ?
+                    WHERE merchant_transaction_id = ?
+                      AND COALESCE(order_status, '') <> 'completed'
+                    """, responseJson, failureReason, merchantTransactionId);
+        }
+    }
+
+    public void markCashfreeOrderFailedByMerchant(String merchantTransactionId, String failureReason) {
+        jdbc.update("""
+                UPDATE cashfreepg_orders
+                SET remarks = LEFT(CONCAT('FULFILLMENT_FAILED: ', ?), 255)
+                WHERE merchant_order_id = ?
+                  AND COALESCE(remarks, '') NOT LIKE 'FULFILLMENT_COMPLETED%'
+                """, failureReason, merchantTransactionId);
+    }
 }
