@@ -127,6 +127,7 @@ public class GoldFulfillmentService {
         repository.incrementRetryCount(requestId);
 
         // 5. Call Sabbpegold's buy endpoint with live rate (wrapper format)
+        // Only send the fields the wrapper forwards to Augmont.
         Map<String, Object> innerRequest = new LinkedHashMap<>();
         innerRequest.put("lockPrice", lockPrice);
         innerRequest.put("metalType", metalType);
@@ -134,21 +135,8 @@ public class GoldFulfillmentService {
         innerRequest.put("amount", String.valueOf(orderAmount));
         innerRequest.put("merchantTransactionId", merchantOrderId);
         innerRequest.put("uniqueId", customerId);
-        innerRequest.put("phoneNumber", customerMobile);
         innerRequest.put("blockId", blockId);
         innerRequest.put("modeOfPayment", "CASHFREE");
-        innerRequest.put("referenceType", null);
-        innerRequest.put("referenceId", null);
-        innerRequest.put("utmSource", null);
-        innerRequest.put("utmMedium", null);
-        innerRequest.put("utmCampaign", null);
-        innerRequest.put("emailId", null);
-        innerRequest.put("userName", null);
-        innerRequest.put("userAddress", null);
-        innerRequest.put("userCity", null);
-        innerRequest.put("userState", null);
-        innerRequest.put("userPincode", null);
-        innerRequest.put("mobileNumber", customerMobile);
 
         Map<String, Object> buyRequest = new LinkedHashMap<>();
         buyRequest.put("merchantId", merchantOrderId);

@@ -1,0 +1,102 @@
+# Prompt for Frontend Team — Level 2 Retry Buy
+
+## IMPORTANT
+When Level 2 admin clicks "Retry Buy", the frontend calls ONLY ONE dashboard API:
+
+```
+POST http://localhost:8082/api/v1/admin/fulfillment/{request_id}/retry-buy
+```
+
+You do NOT call uatbckend.karatly.net directly.
+You do NOT call Augmont directly.
+You do NOT pass live rate / lockPrice / blockId / merchantId manually.
+
+The backend automatically:
+1. Fetches LIVE RATE from uatbckend.karatly.net
+2. Picks lockPrice (gBuy for gold / sBuy for silver) + blockId from the live rate
+3. Calls uatbckend buy/create with the correct wrapper format
+4. Marks request PROCESSED (success) or REJECTED (failure)
+
+## Request (Level 2 admin clicks Retry)
+```
+POST /api/v1/admin/fulfillment/1/retry-buy
+Content-Type: application/json
+```
+```json
+{
+  "adminId": 7,
+  "note": "Retrying buy with live rate"
+}
+```
+
+## Response — SUCCESS
+```json
+{
+  "success": true,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "Karatly2026090910232282c851",
+    "customer_id": "995875001313121985",
+    "customer_name": "Sai",
+    "customer_mobile": "7989019142",
+    "order_amount": 103.00,
+    "lock_price": "15257.84",
+    "block_id": "BLOCK_ID",
+    "metal_type": "gold",
+    "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+    "status": "PROCESSED",
+    "level2_note": "Retrying buy with live rate",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-09 11:07:18"
+  },
+  "sabbpe_order_id": "Karatly2026090910232282c851",
+  "live_rate_used": "15940.49",
+  "buy_response": {
+    "status": "success",
+    "payload": { "...Augmont buy result..." }
+  }
+}
+```
+
+## Response — FAILURE
+```json
+{
+  "success": false,
+  "request": {
+    "id": 1,
+    "status": "REJECTED",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-09 11:07:18"
+  },
+  "sabbpe_order_id": "Karatly2026090910232282c851",
+  "live_rate_used": "",
+  "buy_response": {
+    "status": "FAILED",
+    "message": "400 Bad Request: Augmont request validation failed"
+  }
+}
+```
+
+## IMPORTANT for UI
+- HTTP status is ALWAYS 200 — check the `success` field:
+```js
+if (data.success === true) {
+    // show green badge PROCESSED
+    // option: show live_rate_used to admin
+} else {
+    // show red badge REJECTED
+    // show data.buy_response.message to admin
+}
+```
+
+## UI flow on Level 2 dashboard
+1. Level 2 sees pending request → click "Retry Buy"
+2. Optional confirm modal (show amount + customer + note field)
+3. Call the retry endpoint above
+4. On success → refresh pending list → request no longer PENDING
+5. On failure → show error from `buy_response.message`
+
+## request_id source
+`request_id` comes from:
+- `POST /api/v1/admin/fulfillment/pending` → response `requests[].id`
+- or `POST /api/v1/admin/fulfillment/create` → response `request_id`

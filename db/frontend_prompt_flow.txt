@@ -1,0 +1,348 @@
+# Karatly Dashboard — Gold Fulfillment Flow (Frontend Integration)
+
+## Base URL
+```
+http://localhost:8082
+```
+
+## No Authentication / No Token
+All endpoints below require **NO Authorization header**. Every request sends `adminId` (the id returned by login) directly in the JSON body.
+
+---
+
+## FLOW OVERVIEW
+
+```
+[LEVEL 1 ADMIN]                          [LEVEL 2 ADMIN (Super)]
+Login                          →         Login
+See unfulfilled orders                   See pending requests
+Check details by uniqueId                Check details by uniqueId
+Send request (only uniqueId)   →         Retry buy (uses LIVE RATE)
+```
+
+---
+
+## STEP 0 — Login (for both levels)
+
+### Request
+```
+POST /api/v1/admin/auth/login
+Content-Type: application/json
+```
+```json
+{
+  "phoneNumber": "8888888888",
+  "password": "admin@123"
+}
+```
+
+### Response — SUCCESS
+```json
+{
+  "success": true,
+  "admin": {
+    "id": 7,
+    "phoneNumber": "8888888888",
+    "fullName": "Level1 Admin",
+    "email": "level1@karatly.net",
+    "isSuperAdmin": false
+  }
+}
+```
+> Save `admin.id` (e.g. `7`) → use as `adminId` in every request.
+
+### Response — WRONG credentials
+```json
+{
+  "success": false,
+  "message": "Invalid phone number or password"
+}
+```
+
+---
+
+## STEP 1 — [Level 1] See paid-but-no-gold orders
+
+### Request
+```
+POST /api/v1/admin/dashboard/unfulfilled-cashfree
+```
+```json
+{
+  "days": 90,
+  "status": "ALL"
+}
+```
+`status`: `ALL` | `FAILED` | `PENDING`
+
+### Response
+```json
+{
+  "orders": [
+    {
+      "sabbpe_order_id": "Karatly2026090910232282c851",
+      "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+      "customer_id": "995875001313121985",
+      "customer_name": "Sai",
+      "customer_mobile": "7989019142",
+      "order_amount": 103.00,
+      "order_status": "PAID",
+      "fulfillment_status": "FULFILLMENT_FAILED: ...",
+      "payment_status": "SUCCESS",
+      "cf_payment_id": 218071555613184,
+      "provider_reference": "995875001313121985",
+      "created_at": "2026-09-09 10:23:22"
+    }
+  ]
+}
+```
+> Take `customer_id` → this is the **uniqueId** used in next steps.
+
+---
+
+## STEP 2 — [Level 1 OR Level 2] Lookup details by uniqueId
+
+### Request
+```
+POST /api/v1/admin/fulfillment/lookup-unique
+```
+```json
+{
+  "adminId": 7,
+  "uniqueId": "995875001313121985"
+}
+```
+
+### Response
+```json
+{
+  "orders": [
+    {
+      "sabbpe_order_id": "Karatly2026090910232282c851",
+      "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+      "customer_id": "995875001313121985",
+      "customer_name": "Sai",
+      "customer_mobile": "7989019142",
+      "order_amount": 103.00,
+      "order_status": "PAID",
+      "fulfillment_status": "FULFILLMENT_FAILED: ...",
+      "flow_type": "DIGITAL_BUY",
+      "metal_type": "gold",
+      "lock_price": "15257.84",
+      "block_id": "BLOCK_ID",
+      "payment_status": "SUCCESS",
+      "cf_payment_id": 218071555613184,
+      "augmont_message": null,
+      "provider_response_payload": "{...full raw Augmont error...}",
+      "payment_time": "2026-09-09 10:25:26",
+      "created_at": "2026-09-09 10:23:22"
+    }
+  ]
+}
+```
+> **Level 1** uses this to verify before sending. **Level 2** uses this to review the failure reason (merchant id, Augmont error message).
+
+---
+
+## STEP 3 — [Level 1] Send request to Level 2
+
+### Request
+```
+POST /api/v1/admin/fulfillment/create
+```
+```json
+{
+  "adminId": 7,
+  "uniqueId": "995875001313121985",
+  "level1Note": "Customer paid but gold not received. Please check and retry."
+}
+```
+> `uniqueId` is the ONLY order identifier needed. Backend auto-fetches all details.
+
+### Response — SUCCESS
+```json
+{
+  "success": true,
+  "request_id": 1,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "Karatly2026090910232282c851",
+    "customer_id": "995875001313121985",
+    "customer_name": "Sai",
+    "customer_mobile": "7989019142",
+    "order_amount": 103.00,
+    "lock_price": "15257.84",
+    "block_id": "BLOCK_ID",
+    "metal_type": "gold",
+    "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+    "status": "PENDING",
+    "level1_note": "Customer paid but gold not received. Please check and retry.",
+    "level2_note": null,
+    "retry_count": 0,
+    "created_at": "2026-09-09 11:03:43"
+  },
+  "message": "Request sent to Level 2 admin"
+}
+```
+> Save `request_id` (e.g. `1`) → used in retry step.
+> If same order already has PENDING/APPROVED request → error: `"A pending or approved request already exists for this order"`.
+
+---
+
+## STEP 4 — [Level 2] See pending requests
+
+### Request
+```
+POST /api/v1/admin/fulfillment/pending
+```
+```json
+{
+  "adminId": 7
+}
+```
+
+### Response
+```json
+{
+  "requests": [
+    {
+      "id": 1,
+      "sabbpe_order_id": "Karatly2026090910232282c851",
+      "customer_id": "995875001313121985",
+      "customer_name": "Sai",
+      "customer_mobile": "7989019142",
+      "order_amount": 103.00,
+      "lock_price": "15257.84",
+      "block_id": "BLOCK_ID",
+      "metal_type": "gold",
+      "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+      "augmont_message": null,
+      "status": "PENDING",
+      "level1_note": "Customer paid but gold not received. Please check and retry.",
+      "level2_note": null,
+      "retry_count": 0,
+      "last_retry_at": null,
+      "created_by_name": "Level1 Admin",
+      "created_at": "2026-09-09 11:03:43",
+      "updated_at": "2026-09-09 11:03:43"
+    }
+  ]
+}
+```
+
+---
+
+## STEP 5 — [Level 2] Retry buy (uses LIVE RATE automatically)
+
+### Request
+```
+POST /api/v1/admin/fulfillment/1/retry-buy
+```
+```json
+{
+  "adminId": 7,
+  "note": "Retrying buy with live rate"
+}
+```
+> `1` = the request_id from STEP 3.
+
+### What backend does
+1. Fetches live rate from sabbpegold → `https://uatbckend.karatly.net/api/v1/rates/live`
+2. Extracts `lockPrice` (`rates.gBuy` for gold / `rates.sBuy` for silver) and `blockId`
+3. Calls sabbpegold buy → `https://uatbckend.karatly.net/api/v1/orders/buy/create`
+4. On success → marks request `PROCESSED` + updates `cashfreepg_orders.remarks='FULFILLMENT_COMPLETED'`
+5. On failure → marks request `REJECTED`
+
+### Response — SUCCESS
+```json
+{
+  "success": true,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "Karatly2026090910232282c851",
+    "customer_id": "995875001313121985",
+    "order_amount": 103.00,
+    "metal_type": "gold",
+    "merchant_order_id": "KARATLY-CF-20260909102322182-71020400",
+    "status": "PROCESSED",
+    "level2_note": "Retrying buy with live rate",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-09 11:07:18"
+  },
+  "sabbpe_order_id": "Karatly2026090910232282c851",
+  "live_rate_used": "15940.49",
+  "buy_response": {
+    "status": "success",
+    "payload": { "...Augmont buy result..." }
+  }
+}
+```
+
+### Response — FAILURE
+```json
+{
+  "success": false,
+  "request": {
+    "id": 1,
+    "status": "REJECTED",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-09 11:07:18"
+  },
+  "sabbpe_order_id": "Karatly2026090910232282c851",
+  "live_rate_used": "",
+  "buy_response": {
+    "status": "FAILED",
+    "message": "400 Bad Request: Augmont request validation failed"
+  }
+}
+```
+
+---
+
+## STATUS FLOW
+
+```
+PENDING  →  PROCESSED   (retry gold buy succeeded)
+PENDING  →  REJECTED    (retry gold buy failed)
+```
+
+| Status    | Meaning                          |
+|-----------|----------------------------------|
+| PENDING   | Level 1 sent, Level 2 must review |
+| APPROVED  | (reserved)                        |
+| PROCESSED | gold bought successfully          |
+| REJECTED  | gold buy failed                   |
+
+---
+
+## UI REQUIREMENTS
+
+### Level 1 Admin Dashboard
+1. **Login form** → phone + password → show error if `success:false`
+2. **Unfulfilled table** (STEP 1): columns → customer, mobile, amount, payment status, created date
+3. Per row: **"Send Request"** button
+   - optional note field
+   - calls STEP 3 with `uniqueId = customer_id`
+4. Show toast: `request_id` + confirmation
+
+### Level 2 Admin Dashboard
+1. **Login form** → same
+2. **Pending table** (STEP 4): → customer, amount, metal, merchant_order_id, level1 note, retry count
+3. Per row: **"Details"** (STEP 2 lookup) + **"Retry Buy"** button
+4. **Retry** → confirm modal → calls STEP 5
+5. Show result → success badge `PROCESSED` / failure message
+
+### Status Badge Colors
+| Status    | Color  |
+|-----------|--------|
+| PENDING   | yellow |
+| PROCESSED | green  |
+| REJECTED  | red    |
+
+---
+
+## SUCCESS RESPONSE CHECK
+Always check `success` field (not HTTP status) — retry returns HTTP 200 even on buy failure:
+```js
+if (data.success === true) { /* ok */ } else { /* show data.message / data.buy_response.message */ }
+```
