@@ -113,7 +113,7 @@ public class GoldFulfillmentRepository {
                     UPDATE orders
                     SET order_status = 'failed',
                         provider_response_payload = ?,
-                        failure_reason = ?
+                        failure_reason = LEFT(?, 250)
                     WHERE merchant_transaction_id = ?
                       AND COALESCE(order_status, '') <> 'completed'
                     """, responseJson, failureReason, merchantTransactionId);
