@@ -70,6 +70,17 @@ public class GoldFulfillmentService {
     }
 
     /**
+     * Proxy retry-buy: forwards the exact request body that
+     * https://uatbckend.karatly.net/api/v1/orders/buy/create expects.
+     * The dashboard does NOT build the buy request — caller sends it.
+     * Only call to sabbpe backend + return its response.
+     */
+    public Map<String, Object> retryBuy(Map<String, Object> body) {
+        Map<String, Object> buyResponse = sabbpeBackendService.createBuyOrder(body);
+        return buyResponse;
+    }
+
+    /**
      * Level 2 admin retries gold buy for a failed order.
      * Fetches live rate from Sabbpegold and uses it for the buy.
      */
@@ -127,7 +138,7 @@ public class GoldFulfillmentService {
         repository.incrementRetryCount(requestId);
 
         // 5. Call Sabbpegold's buy endpoint with live rate (wrapper format)
-        // Only send the fields the wrapper forwards to Augmont.
+        // Send exactly what buy/create wants: merchantId + request wrapper.
         Map<String, Object> innerRequest = new LinkedHashMap<>();
         innerRequest.put("lockPrice", lockPrice);
         innerRequest.put("metalType", metalType);
@@ -135,8 +146,10 @@ public class GoldFulfillmentService {
         innerRequest.put("amount", String.valueOf(orderAmount));
         innerRequest.put("merchantTransactionId", merchantOrderId);
         innerRequest.put("uniqueId", customerId);
+        innerRequest.put("phoneNumber", customerMobile);
         innerRequest.put("blockId", blockId);
         innerRequest.put("modeOfPayment", "CASHFREE");
+        innerRequest.put("mobileNumber", customerMobile);
 
         Map<String, Object> buyRequest = new LinkedHashMap<>();
         buyRequest.put("merchantId", merchantOrderId);

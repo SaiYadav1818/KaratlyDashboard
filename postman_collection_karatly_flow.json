@@ -1,7 +1,7 @@
 {
 	"info": {
 		"name": "Karatly Dashboard — Fulfillment Flow",
-		"description": "Complete flow: L1 sees unfulfilled → L1 sends request (uniqueId) → L2 sees details → L2 lookup → L2 retry buy (live rate)",
+		"description": "Complete flow: L1 sees unfulfilled → L1 sends request (uniqueId) → L2 sees details → L2 lookup → L2 retry buy (proxy to uatbckend buy/create)",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"variable": [
@@ -204,10 +204,22 @@
 			"response": []
 		},
 		{
-			"name": "STEP 8 — [Level 2] Retry buy (live rate)",
+			"name": "STEP 8 — [Level 2] Retry buy (proxy to uatbckend buy/create)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var json = pm.response.json();",
+							"console.log('Retry result:', JSON.stringify(json));"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
 			"request": {
 				"method": "POST",
-				"url": "{{baseUrl}}/api/v1/admin/fulfillment/{{request_id}}/retry-buy",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/retry-buy",
 				"header": [
 					{
 						"key": "Content-Type",
@@ -216,7 +228,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"adminId\": {{admin2}},\n  \"note\": \"Retrying buy with live rate\"\n}"
+					"raw": "{\n  \"merchantId\": \"KARATLY-CF-20260909102322182-71020400\",\n  \"request\": {\n    \"lockPrice\": \"15964.93\",\n    \"metalType\": \"gold\",\n    \"quantity\": null,\n    \"amount\": \"103.00\",\n    \"merchantTransactionId\": \"KARATLY-CF-20260909102322182-71020400\",\n    \"uniqueId\": \"995875001313121985\",\n    \"phoneNumber\": \"7989019142\",\n    \"blockId\": \"Xeaa3EQX\",\n    \"modeOfPayment\": \"CASHFREE\",\n    \"mobileNumber\": \"7989019142\"\n  }\n}"
 				}
 			},
 			"response": []

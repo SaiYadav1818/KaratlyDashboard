@@ -111,7 +111,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"adminId\": 1,\n  \"uniqueId\": \"09876543212\",\n  \"level1Note\": \"User paid but gold not received\"\n}"
+					"raw": "{\n  \"adminId\": 7,\n  \"uniqueId\": \"995875001313121985\",\n  \"level1Note\": \"User paid but gold not received\"\n}"
 				}
 			},
 			"response": []
@@ -129,7 +129,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"adminId\": 2,\n  \"uniqueId\": \"09876543212\"\n}"
+					"raw": "{\n  \"adminId\": 2,\n  \"uniqueId\": \"995875001313121985\"\n}"
 				}
 			},
 			"response": []
@@ -153,10 +153,10 @@
 			"response": []
 		},
 		{
-			"name": "7. Retry Buy (Level 2 — Live Rate)",
+			"name": "7. Retry Buy (Proxy to uatbckend buy/create)",
 			"request": {
 				"method": "POST",
-				"url": "{{baseUrl}}/api/v1/admin/fulfillment/1/retry-buy",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/retry-buy",
 				"header": [
 					{
 						"key": "Content-Type",
@@ -165,7 +165,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"adminId\": 2,\n  \"note\": \"Retrying with live rate\"\n}"
+					"raw": "{\n  \"merchantId\": \"KARATLY-CF-20260909102322182-71020400\",\n  \"request\": {\n    \"lockPrice\": \"15964.93\",\n    \"metalType\": \"gold\",\n    \"quantity\": null,\n    \"amount\": \"103.00\",\n    \"merchantTransactionId\": \"KARATLY-CF-20260909102322182-71020400\",\n    \"uniqueId\": \"995875001313121985\",\n    \"phoneNumber\": \"7989019142\",\n    \"blockId\": \"Xeaa3EQX\",\n    \"modeOfPayment\": \"CASHFREE\",\n    \"mobileNumber\": \"7989019142\"\n  }\n}"
 				}
 			},
 			"response": []

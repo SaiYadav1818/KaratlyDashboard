@@ -21,8 +21,6 @@ public class GoldFulfillmentController {
 
     public record LookupRequest(Long adminId, String uniqueId) {}
 
-    public record RetryRequest(Long adminId, String note) {}
-
     /**
      * POST /api/v1/admin/fulfillment/create
      * Level 1 admin: send request to Level 2 using ONLY the unique id.
@@ -54,12 +52,13 @@ public class GoldFulfillmentController {
     }
 
     /**
-     * POST /api/v1/admin/fulfillment/{id}/retry-buy
-     * Level 2 admin: retry gold buy for a failed order using live rate
+     * POST /api/v1/admin/fulfillment/retry-buy
+     * Level 2 admin: retry gold buy.
+     * Body = exactly what https://uatbckend.karatly.net/api/v1/orders/buy/create
+     * expects ({ merchantId, request }). Dashboard forwards it internally.
      */
-    @PostMapping("/{id}/retry-buy")
-    public Map<String, Object> retryBuy(@PathVariable("id") long requestId,
-                                        @RequestBody RetryRequest request) {
-        return service.retryBuy(String.valueOf(request.adminId()), requestId, request.note());
+    @PostMapping("/retry-buy")
+    public Map<String, Object> retryBuy(@RequestBody Map<String, Object> body) {
+        return service.retryBuy(body);
     }
 }
