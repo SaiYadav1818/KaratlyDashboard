@@ -1,0 +1,10 @@
+-- MIGRATION: Add buy parameters to gold_fulfillment_requests
+-- Run this if the table already exists
+
+ALTER TABLE gold_fulfillment_requests
+    ADD COLUMN IF NOT EXISTS lock_price      VARCHAR(20)  DEFAULT NULL COMMENT 'Locked rate from payment snapshot' AFTER order_amount,
+    ADD COLUMN IF NOT EXISTS block_id        VARCHAR(64)  DEFAULT NULL COMMENT 'Block ID from payment snapshot' AFTER lock_price,
+    ADD COLUMN IF NOT EXISTS metal_type      VARCHAR(20)  DEFAULT 'gold' COMMENT 'gold or silver' AFTER block_id,
+    ADD COLUMN IF NOT EXISTS merchant_order_id VARCHAR(64) DEFAULT NULL COMMENT 'Merchant order ID for Augmont buy' AFTER metal_type,
+    ADD COLUMN IF NOT EXISTS retry_count     INT          NOT NULL DEFAULT 0 COMMENT 'Number of retry attempts' AFTER level2_note,
+    ADD COLUMN IF NOT EXISTS last_retry_at   DATETIME     DEFAULT NULL AFTER retry_count;

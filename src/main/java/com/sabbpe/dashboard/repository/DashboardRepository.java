@@ -89,4 +89,16 @@ public class DashboardRepository {
     public List<Map<String, Object>> redeems(int days) {
         return jdbc.queryForList("CALL sp_dashboard_redeems(?)", days);
     }
+
+    public List<Map<String, Object>> searchClients(String term) {
+        return jdbc.queryForList("CALL sp_dashboard_search_clients(?)", term);
+    }
+
+    public List<Map<String, Object>> searchCashfreePayments(String term) {
+        return jdbc.queryForList("CALL sp_dashboard_search_cashfree(?)", term);
+    }
+
+    public List<Map<String, Object>> unfulfilledCashfree(int days, String status) {
+        return jdbc.queryForList("CALL sp_dashboard_unfulfilled_cashfree(?, ?)", days, status);
+    }
 }

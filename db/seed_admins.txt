@@ -1,0 +1,23 @@
+-- SEED: Add Level 1 and Level 2 admins
+-- Run this on sabbpekaratly DB
+-- Password for both: admin@123
+
+DELIMITER //
+
+-- Level 2 Admin (Super Admin)
+INSERT INTO dashboard_admin_users
+    (phone_number, full_name, email, password_hash, is_super_admin)
+VALUES
+    ('9999999999', 'Super Admin', 'admin@karatly.net',
+     '$2a$10$kejTFZVMjFIj1GLKVXuW.ei9zexiVF5wu6RmdfLeDUFXrE5T5ggUu', 1)
+ON DUPLICATE KEY UPDATE is_super_admin = 1//
+
+-- Level 1 Admin (Regular Admin)
+INSERT INTO dashboard_admin_users
+    (phone_number, full_name, email, password_hash, is_super_admin)
+VALUES
+    ('8888888888', 'Level1 Admin', 'level1@karatly.net',
+     '$2a$10$kejTFZVMjFIj1GLKVXuW.ei9zexiVF5wu6RmdfLeDUFXrE5T5ggUu', 0)
+ON DUPLICATE KEY UPDATE is_super_admin = 0//
+
+DELIMITER ;

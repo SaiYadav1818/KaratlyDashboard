@@ -1,0 +1,243 @@
+# Frontend Integration Prompt — Gold Fulfillment with Retry (No Token)
+
+## IMPORTANT: No JWT / Bearer Token needed
+All fulfillment + dashboard endpoints below are **public**. You do NOT need an `Authorization` header.
+Each request includes `adminId` directly in the request body.
+
+Base URL: `http://localhost:8082`
+
+---
+
+## FLOW OVERVIEW
+
+```
+┌─ Level 1 Admin ─────────────────────────────────────────────┐
+│ 1. Login (phone/password)                     [still exists] │
+│ 2. View unfulfilled orders (paid but no gold)                │
+│ 3. Click "Send Request" → creates fulfillment request        │
+└──────────────────────────────────────────────────────────────┘
+                       │
+                       ▼
+┌─ Level 2 Admin ─────────────────────────────────────────────┐
+│ 1. Login (phone/password)                     [still exists] │
+│ 2. See pending requests                                      │
+│ 3. Click "Retry Buy" → uses LIVE RATE → gold purchased       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Login (still works, no change)
+
+```
+POST /api/v1/admin/auth/login
+Body: { "phoneNumber": "9999999999", "password": "admin@123" }
+Response: {
+  "token": "...",          <- keep this, but NOT required for fulfillment APIs
+  "admin": { "id": 2, "isSuperAdmin": true }
+}
+```
+
+Use the returned `admin.id` in the fulfillment request bodies.
+
+---
+
+## 2. Level 1: View unfulfilled orders (paid but gold not received)
+
+```
+POST /api/v1/admin/dashboard/unfulfilled-cashfree
+Body: { "days": 90, "status": "ALL" }     // status: ALL | FAILED | PENDING
+```
+
+**Response:**
+```json
+{
+  "orders": [
+    {
+      "sabbpe_order_id": "SABBPE_123",
+      "merchant_order_id": "MERCHANT_789",
+      "customer_id": "09876543212",
+      "customer_name": "Rahul Sharma",
+      "customer_mobile": "919876543210",
+      "order_amount": 5000.00,
+      "order_status": "...",
+      "fulfillment_status": "FULFILLMENT_FAILED: Augmont timeout",
+      "payment_status": "SUCCESS",
+      "cf_payment_id": "...",
+      "provider_reference": "09876543212",
+      "created_at": "2026-09-08 10:30:00"
+    }
+  ]
+}
+```
+
+Map these fields → create request (below).
+
+---
+
+## 3. Level 1: Send request to Level 2
+
+```
+POST /api/v1/admin/fulfillment/create
+Body: {
+  "adminId": 1,
+  "sabbpeOrderId": "SABBPE_123",
+  "customerId": "09876543212",
+  "customerName": "Rahul Sharma",
+  "customerMobile": "919876543210",
+  "orderAmount": 5000.00,
+  "metalType": "gold",
+  "merchantOrderId": "MERCHANT_789",
+  "level1Note": "User paid but gold not received"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "request_id": 1,
+  "message": "Request sent to Level 2 admin"
+}
+```
+
+---
+
+## 4. Level 2: View pending requests
+
+```
+POST /api/v1/admin/fulfillment/pending
+Body: { "adminId": 2 }
+```
+
+**Response:**
+```json
+{
+  "requests": [
+    {
+      "id": 1,
+      "sabbpe_order_id": "SABBPE_123",
+      "customer_id": "09876543212",
+      "customer_name": "Rahul Sharma",
+      "customer_mobile": "919876543210",
+      "order_amount": 5000.00,
+      "metal_type": "gold",
+      "merchant_order_id": "MERCHANT_789",
+      "status": "PENDING",
+      "level1_note": "User paid but gold not received",
+      "level2_note": null,
+      "retry_count": 0,
+      "last_retry_at": null,
+      "created_by_name": "Level1 Admin",
+      "created_at": "2026-09-08 10:30:00",
+      "updated_at": "2026-09-08 10:30:00"
+    }
+  ]
+}
+```
+
+---
+
+## 5. Level 2: Retry Buy (uses LIVE RATE automatically)
+
+```
+POST /api/v1/admin/fulfillment/1/retry-buy
+Body: { "adminId": 2, "note": "Retrying now" }
+```
+
+**What happens server-side:**
+1. Dashboard fetches LIVE rate from sabbpegold (`POST /api/v1/rates/live`)
+2. Extracts `lockPrice` and `blockId` for the metal type
+3. Calls sabbpegold buy (`POST /api/v1/orders/buy/create`) with the SAME amount + merchantOrderId
+4. Updates request status
+
+**Response on success:**
+```json
+{
+  "success": true,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "SABBPE_123",
+    "status": "PROCESSED",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-08 15:45:00"
+  },
+  "sabbpe_order_id": "SABBPE_123",
+  "live_rate_used": "7150.50",
+  "buy_response": {
+    "status": "SUCCESS",
+    "payload": { }
+  }
+}
+```
+
+**Response on failure:**
+```json
+{
+  "success": false,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "SABBPE_123",
+    "status": "REJECTED",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-08 15:45:00"
+  },
+  "sabbpe_order_id": "SABBPE_123",
+  "live_rate_used": "7150.50",
+  "buy_response": {
+    "status": "FAILED",
+    "message": "Insufficient balance"
+  }
+}
+```
+
+---
+
+## 6. Status Flow
+```
+PENDING  →  PROCESSED   (retry succeeded)
+PENDING  →  REJECTED    (retry failed)
+```
+
+---
+
+## UI Requirements
+
+### Level 1 Dashboard
+- Table of unfulfilled orders (from `/unfulfilled-cashfree`)
+- "Send Request" button per row → opens modal with note → submit to `/fulfillment/create`
+- After send, show success message with request_id
+
+### Level 2 Dashboard
+- Table of pending requests (from `/fulfillment/pending`)
+- Each row: customer, order id, amount, metal type, note, status badge, retry count
+- "Retry Buy" button → opens confirm modal showing:
+  - Original amount
+  - LIVE rate that will be used
+  - Optional note
+- On confirm → call `/fulfillment/{id}/retry-buy`
+- Show result (success → PROCESSED badge, failure → REJECTED badge with error)
+
+### Status Badge Colors
+| Status    | Color   |
+|-----------|---------|
+| PENDING   | yellow  |
+| PROCESSED | green   |
+| REJECTED  | red     |
+
+---
+
+## Request Status Values
+- `PENDING` — Level 1 sent, waiting for Level 2
+- `PROCESSED` — gold bought via retry (success)
+- `REJECTED` — retry failed
+
+---
+
+## Files Changed (for reference)
+- `GoldFulfillmentController.java` — 3 endpoints, adminId from body, no token
+- `GoldFulfillmentService.java` — retry fetches live rate before buy
+- `SabbpeBackendService.java` — fetchLiveRates() + createBuyOrder()
+- `JwtAuthFilter.java` — fulfillment/dashboard paths are public
+- `db/execute_part8_fulfillment_requests.txt` — table + stored procedures
+- `db/fix_search_unfulfilled.txt` — search/unfulfilled query fix (customer_id = provider_client_reference)

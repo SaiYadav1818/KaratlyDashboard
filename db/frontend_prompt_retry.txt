@@ -1,0 +1,116 @@
+# Gold Fulfillment Retry Flow — Frontend Prompt
+
+## Overview
+Level 2 admin can retry gold buy for failed orders directly from the dashboard.
+
+## Flow
+```
+1. Level 2 admin sees pending request with status "FAILED" or "PENDING"
+2. Clicks "Retry Buy" button
+3. Dashboard calls POST /api/v1/admin/fulfillment/{id}/retry-buy
+4. Dashboard loads buy parameters from the request (lock_price, block_id, metal_type, etc.)
+5. Dashboard calls Sabbpegold POST /api/v1/orders/buy/create with these parameters
+6. If buy succeeds → status becomes "PROCESSED"
+7. If buy fails → status becomes "REJECTED" with error message
+8. Retry count is incremented
+```
+
+## API Endpoints
+
+### 1. Create Request (Level 1 admin)
+```
+POST /api/v1/admin/fulfillment/create
+Headers: Authorization: Bearer <token>
+Body: {
+  "sabbpeOrderId": "ORDER_123",
+  "customerId": "09876543212",
+  "customerName": "Rahul Sharma",
+  "customerMobile": "9876543210",
+  "orderAmount": 5000.00,
+  "lockPrice": "5200.00",
+  "blockId": "BLOCK_456",
+  "metalType": "gold",
+  "merchantOrderId": "MERCHANT_789",
+  "level1Note": "User paid but gold not received"
+}
+Response: {
+  "success": true,
+  "request_id": 1,
+  "message": "Request sent to Level 2 admin"
+}
+```
+
+### 2. Retry Buy (Level 2 admin)
+```
+POST /api/v1/admin/fulfillment/1/retry-buy
+Headers: Authorization: Bearer <level2_token>
+Body: { "note": "Retrying gold purchase" }
+Response: {
+  "success": true,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "ORDER_123",
+    "status": "PROCESSED",
+    "retry_count": 1,
+    "last_retry_at": "2026-09-08 15:45:00"
+  },
+  "sabbpe_order_id": "ORDER_123",
+  "buy_response": {
+    "status": "SUCCESS",
+    "payload": { ... }
+  }
+}
+```
+
+### 3. List Pending Requests (Level 2 admin)
+```
+GET /api/v1/admin/fulfillment/pending
+Headers: Authorization: Bearer <level2_token>
+Response: {
+  "requests": [
+    {
+      "id": 1,
+      "sabbpe_order_id": "ORDER_123",
+      "customer_id": "09876543212",
+      "customer_name": "Rahul Sharma",
+      "customer_mobile": "9876543210",
+      "order_amount": 5000.00,
+      "lock_price": "5200.00",
+      "block_id": "BLOCK_456",
+      "metal_type": "gold",
+      "merchant_order_id": "MERCHANT_789",
+      "status": "PENDING",
+      "level1_note": "User paid but gold not received",
+      "level2_note": null,
+      "retry_count": 0,
+      "last_retry_at": null,
+      "created_by_name": "John Admin",
+      "created_at": "2026-09-08 10:30:00",
+      "updated_at": "2026-09-08 10:30:00"
+    }
+  ]
+}
+```
+
+## Frontend UI
+
+### Level 2 Admin Dashboard
+1. Show pending requests table
+2. Each row shows:
+   - Order ID, Customer name, Amount
+   - Status badge (PENDING/APPROVED/REJECTED/PROCESSED)
+   - Retry count (if > 0)
+   - Last retry time (if retried)
+3. Action buttons:
+   - "Approve" → calls POST /{id}/approve
+   - "Reject" → calls POST /{id}/reject
+   - "Retry Buy" → calls POST /{id}/retry-buy (only for PENDING/APPROVED status)
+   - "Mark Processed" → calls POST /{id}/process (only for APPROVED status)
+
+## Files Modified
+- `db/execute_part8_fulfillment_requests.sql` — added lock_price, block_id, metal_type, merchant_order_id, retry_count, last_retry_at
+- `db/migration_v6_fulfillment_buy_params.txt` — migration for existing tables
+- `GoldFulfillmentRepository.java` — added incrementRetryCount()
+- `GoldFulfillmentService.java` — updated createRequest(), retryBuy()
+- `GoldFulfillmentController.java` — updated CreateRequest record
+- `SabbpeBackendService.java` — removed retryBuy(), kept createBuyOrder()

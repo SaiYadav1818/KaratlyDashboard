@@ -4,6 +4,7 @@ com\sabbpe\dashboard\controller\AuthController$LoginRequest.class
 com\sabbpe\dashboard\controller\AuthController$CreateAdminRequest.class
 com\sabbpe\dashboard\controller\DashboardController.class
 com\sabbpe\dashboard\repository\AdminAuthRepository.class
+com\sabbpe\dashboard\service\SabbpeBackendService.class
 com\sabbpe\dashboard\repository\DashboardRepository.class
 com\sabbpe\dashboard\DashboardApplication.class
 com\sabbpe\dashboard\filter\ApiRequestResponseLoggingFilter.class
