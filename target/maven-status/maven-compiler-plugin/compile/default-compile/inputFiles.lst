@@ -1,6 +1,5 @@
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\CorsConfig.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\GlobalExceptionHandler.java
-C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\config\JwtAuthFilter.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\AlertController.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\AuthController.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\controller\DashboardController.java
@@ -14,5 +13,4 @@ C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dash
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\AlertService.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\AuthService.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\GoldFulfillmentService.java
-C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\JwtService.java
 C:\Users\dudim\Downloads\Karatly\karatly-dashboard\src\main\java\com\sabbpe\dashboard\service\SabbpeBackendService.java

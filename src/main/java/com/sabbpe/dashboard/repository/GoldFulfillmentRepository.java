@@ -16,15 +16,15 @@ public class GoldFulfillmentRepository {
         this.jdbc = jdbc;
     }
 
-    public long createRequest(String sabbpeOrderId, String customerId, String customerName,
-                              String customerMobile, double orderAmount,
-                              String lockPrice, String blockId, String metalType, String merchantOrderId,
-                              long createdBy, String note) {
+    public long createRequest(String uniqueId, long createdBy, String note) {
         Map<String, Object> result = jdbc.queryForMap(
-                "CALL sp_fulfillment_request_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                sabbpeOrderId, customerId, customerName, customerMobile, orderAmount,
-                lockPrice, blockId, metalType, merchantOrderId, createdBy, note);
+                "CALL sp_fulfillment_request_create(?, ?, ?)",
+                uniqueId, createdBy, note);
         return ((Number) result.get("request_id")).longValue();
+    }
+
+    public List<Map<String, Object>> lookupByUniqueId(String uniqueId) {
+        return jdbc.queryForList("CALL sp_fulfillment_lookup_unique(?)", uniqueId);
     }
 
     public List<Map<String, Object>> listMine(long adminId) {

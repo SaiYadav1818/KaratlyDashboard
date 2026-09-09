@@ -16,8 +16,8 @@ public class AlertController {
         this.alertService = alertService;
     }
 
-    public record AcknowledgeRequest() {}
     public record ResolveRequest(String note) {}
+    public record AdminActionRequest(Long adminId, String note) {}
 
     /**
      * GET /api/v1/admin/alerts?days=7&category=&severity=&status=open
@@ -46,7 +46,7 @@ public class AlertController {
      * POST /api/v1/admin/alerts/refresh — manual scan
      */
     @PostMapping("/refresh")
-    public Map<String, Object> refresh(@RequestAttribute("adminId") String adminId) {
+    public Map<String, Object> refresh(@RequestBody(required = false) Map<String, Object> body) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("alerts", alertService.manualRefresh());
         return response;
@@ -57,8 +57,8 @@ public class AlertController {
      */
     @PostMapping("/{id}/acknowledge")
     public Map<String, Object> acknowledge(@PathVariable long id,
-                                           @RequestAttribute("adminId") String adminId) {
-        alertService.acknowledge(id, Long.parseLong(adminId));
+                                           @RequestBody(required = false) Map<String, Object> body) {
+        alertService.acknowledge(id, 1L);
         return Map.of("success", true, "message", "Alert acknowledged");
     }
 
@@ -67,10 +67,9 @@ public class AlertController {
      */
     @PostMapping("/{id}/resolve")
     public Map<String, Object> resolve(@PathVariable long id,
-                                       @RequestAttribute("adminId") String adminId,
-                                       @RequestBody(required = false) ResolveRequest request) {
-        String note = request != null ? request.note() : null;
-        alertService.resolve(id, Long.parseLong(adminId), note);
+                                       @RequestBody(required = false) Map<String, Object> body) {
+        String note = body != null && body.get("note") != null ? String.valueOf(body.get("note")) : null;
+        alertService.resolve(id, 1L, note);
         return Map.of("success", true, "message", "Alert resolved");
     }
 }

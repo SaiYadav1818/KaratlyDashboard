@@ -111,7 +111,25 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"adminId\": 1,\n  \"sabbpeOrderId\": \"SABBPE_123\",\n  \"customerId\": \"09876543212\",\n  \"customerName\": \"Rahul Sharma\",\n  \"customerMobile\": \"919876543210\",\n  \"orderAmount\": 5000.00,\n  \"metalType\": \"gold\",\n  \"merchantOrderId\": \"MERCHANT_789\",\n  \"level1Note\": \"User paid but gold not received\"\n}"
+					"raw": "{\n  \"adminId\": 1,\n  \"uniqueId\": \"09876543212\",\n  \"level1Note\": \"User paid but gold not received\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5b. Lookup by Unique ID (Level 1 or Level 2)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/lookup-unique",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": 2,\n  \"uniqueId\": \"09876543212\"\n}"
 				}
 			},
 			"response": []

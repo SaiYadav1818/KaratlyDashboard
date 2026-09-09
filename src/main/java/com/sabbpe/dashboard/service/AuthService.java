@@ -17,61 +17,36 @@ public class AuthService {
     private static final Pattern PASSWORD_PATTERN = Pattern.compile("^(?=.*[A-Za-z])(?=.*[0-9]).{8,}$");
 
     private final AdminAuthRepository repository;
-    private final JwtService jwtService;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-    public AuthService(AdminAuthRepository repository, JwtService jwtService) {
+    public AuthService(AdminAuthRepository repository) {
         this.repository = repository;
-        this.jwtService = jwtService;
     }
 
     public Map<String, Object> login(String phone, String password) {
         Map<String, Object> admin = repository.getByPhone(normalizePhone(phone));
         if (admin.isEmpty() || !encoder.matches(password, String.valueOf(admin.get("password_hash")))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid phone number or password");
+            return Map.of("success", false, "message", "Invalid phone number or password");
         }
         if (!isActive(admin)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is inactive");
+            return Map.of("success", false, "message", "Account is inactive");
         }
-        String adminId = String.valueOf(admin.get("id"));
-        String token = jwtService.generateToken(adminId, String.valueOf(admin.get("phone_number")),
-                String.valueOf(admin.get("full_name")));
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("token", token);
+        response.put("success", true);
         response.put("admin", toAdminView(admin));
         return response;
     }
 
-    public Map<String, Object> validateToken(String adminId) {
-        Map<String, Object> admin = repository.getById(Long.parseLong(adminId));
+    public Map<String, Object> getAdminById(long adminId) {
+        Map<String, Object> admin = repository.getById(adminId);
         if (admin.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Admin not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin not found");
         }
         return toAdminView(admin);
     }
 
-    public void changePassword(String adminId, String currentPassword, String newPassword) {
-        validatePassword(newPassword);
-        Map<String, Object> admin = requireAdmin(adminId);
-        if (!encoder.matches(currentPassword, String.valueOf(admin.get("password_hash")))) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
-        }
-        repository.updatePassword(Long.parseLong(adminId), encoder.encode(newPassword));
-    }
-
-    public void resetPassword(String callerAdminId, String phone, String newPassword) {
-        requireSuperAdmin(callerAdminId);
-        validatePassword(newPassword);
-        Map<String, Object> target = repository.getByPhone(normalizePhone(phone));
-        if (target.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin not found");
-        }
-        repository.updatePassword(((Number) target.get("id")).longValue(), encoder.encode(newPassword));
-    }
-
-    public Map<String, Object> createAdmin(String callerAdminId, String phone, String name,
+    public Map<String, Object> createAdmin(String phone, String name,
                                            String email, String password, boolean isSuper) {
-        requireSuperAdmin(callerAdminId);
         validatePassword(password);
         Map<String, Object> existing = repository.getByPhone(normalizePhone(phone));
         if (!existing.isEmpty()) {
@@ -82,27 +57,8 @@ public class AuthService {
         return toAdminView(created);
     }
 
-    public List<Map<String, Object>> listAdmins(String callerAdminId) {
-        requireSuperAdmin(callerAdminId);
+    public List<Map<String, Object>> listAdmins() {
         return repository.list();
-    }
-
-    private void requireSuperAdmin(String adminId) {
-        Map<String, Object> admin = requireAdmin(adminId);
-        if (!isSuperAdmin(admin)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Super admin access required");
-        }
-    }
-
-    private Map<String, Object> requireAdmin(String adminId) {
-        Map<String, Object> admin = repository.getById(Long.parseLong(adminId));
-        if (admin.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Admin not found");
-        }
-        if (!isActive(admin)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is inactive");
-        }
-        return admin;
     }
 
     private void validatePassword(String password) {

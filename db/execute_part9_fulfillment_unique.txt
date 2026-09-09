@@ -1,0 +1,199 @@
+-- ============================================================
+-- PART 9 : Fulfillment by Unique ID (Level 1 -> Level 2)
+-- Level 1 sends ONLY the unique id. System looks up all details
+-- from cashfreepg_orders + orders.provider_response_payload.
+-- Run this on sabbpekaratly DB (after PART 8)
+-- ============================================================
+
+DELIMITER //
+
+-- ============================================================
+-- Add augmont_message column (if table exists from PART 8)
+-- ============================================================
+ALTER TABLE gold_fulfillment_requests
+    ADD COLUMN IF NOT EXISTS augmont_message TEXT DEFAULT NULL COMMENT 'Augmont response message from provider_response_payload' AFTER merchant_order_id//
+
+-- ============================================================
+-- 1. LOOKUP: all order + buy request details for a unique id
+-- Used by Level 1 (before creating) and Level 2 (to review)
+-- ============================================================
+DROP PROCEDURE IF EXISTS sp_fulfillment_lookup_unique//
+
+CREATE PROCEDURE sp_fulfillment_lookup_unique(IN p_unique_id VARCHAR(64))
+BEGIN
+    SELECT
+        cfo.sabbpe_order_id,
+        cfo.merchant_order_id,
+        cfo.customer_id,
+        cfo.customer_name,
+        cfo.customer_mobile,
+        cfo.order_amount,
+        cfo.order_status,
+        cfo.remarks                                                   AS fulfillment_status,
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.flowType'))  AS flow_type,
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.metalType')) AS metal_type,
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.lockPrice')) AS lock_price,
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.blockId'))   AS block_id,
+        p.payment_status,
+        p.cf_payment_id,
+        (SELECT JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload,'$.message'))
+           FROM orders o
+           WHERE o.merchant_transaction_id = cfo.merchant_order_id
+           LIMIT 1)                                                    AS augmont_message,
+        (SELECT o.provider_response_payload
+           FROM orders o
+           WHERE o.merchant_transaction_id = cfo.merchant_order_id
+           LIMIT 1)                                                    AS provider_response_payload,
+        DATE_FORMAT(p.payment_time, '%Y-%m-%d %H:%i:%s')              AS payment_time,
+        DATE_FORMAT(cfo.created_at, '%Y-%m-%d %H:%i:%s')              AS created_at
+    FROM cashfreepg_orders cfo
+    LEFT JOIN cashfreepg_payments p ON p.sabbpe_order_id = cfo.sabbpe_order_id
+    WHERE cfo.customer_id = p_unique_id
+    ORDER BY cfo.created_at DESC;
+END//
+
+-- ============================================================
+-- 2. CREATE request (Level 1 sends ONLY unique id)
+-- System auto-resolves all details for the latest order
+-- ============================================================
+DROP PROCEDURE IF EXISTS sp_fulfillment_request_create//
+
+CREATE PROCEDURE sp_fulfillment_request_create(
+    IN p_unique_id   VARCHAR(64),
+    IN p_created_by  BIGINT,
+    IN p_level1_note TEXT
+)
+BEGIN
+    DECLARE v_exists           INT DEFAULT 0;
+    DECLARE v_sabbpe_order_id  VARCHAR(64);
+    DECLARE v_customer_id      VARCHAR(64);
+    DECLARE v_customer_name    VARCHAR(200);
+    DECLARE v_customer_mobile  VARCHAR(20);
+    DECLARE v_order_amount     DECIMAL(18,2);
+    DECLARE v_metal_type       VARCHAR(20);
+    DECLARE v_lock_price       VARCHAR(20);
+    DECLARE v_block_id         VARCHAR(64);
+    DECLARE v_merchant_order_id VARCHAR(64);
+    DECLARE v_augmont_message  TEXT;
+
+    SELECT
+        cfo.sabbpe_order_id,
+        cfo.customer_id,
+        cfo.customer_name,
+        cfo.customer_mobile,
+        cfo.order_amount,
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.metalType')),
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.lockPrice')),
+        JSON_UNQUOTE(JSON_EXTRACT(cfo.provider_request,'$.business.blockId')),
+        cfo.merchant_order_id,
+        (SELECT JSON_UNQUOTE(JSON_EXTRACT(o.provider_response_payload,'$.message'))
+           FROM orders o
+           WHERE o.merchant_transaction_id = cfo.merchant_order_id
+           LIMIT 1)
+    INTO
+        v_sabbpe_order_id, v_customer_id, v_customer_name, v_customer_mobile,
+        v_order_amount, v_metal_type, v_lock_price, v_block_id,
+        v_merchant_order_id, v_augmont_message
+    FROM cashfreepg_orders cfo
+    WHERE cfo.customer_id = p_unique_id
+    ORDER BY cfo.created_at DESC
+    LIMIT 1;
+
+    IF v_sabbpe_order_id IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'No cashfree order found for this unique id';
+    END IF;
+
+    SELECT COUNT(*) INTO v_exists
+    FROM gold_fulfillment_requests
+    WHERE sabbpe_order_id = v_sabbpe_order_id
+      AND status IN ('PENDING', 'APPROVED');
+
+    IF v_exists > 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'A pending or approved request already exists for this order';
+    END IF;
+
+    INSERT INTO gold_fulfillment_requests
+        (sabbpe_order_id, customer_id, customer_name, customer_mobile,
+         order_amount, lock_price, block_id, metal_type, merchant_order_id,
+         augmont_message, created_by, level1_note)
+    VALUES
+        (v_sabbpe_order_id, v_customer_id, v_customer_name, v_customer_mobile,
+         v_order_amount, v_lock_price, v_block_id, v_metal_type, v_merchant_order_id,
+         v_augmont_message, p_created_by, p_level1_note);
+
+    SELECT LAST_INSERT_ID() AS request_id;
+END//
+
+-- ============================================================
+-- 3. LIST pending (Level 2) - includes buy details + augmont message
+-- ============================================================
+DROP PROCEDURE IF EXISTS sp_fulfillment_request_list_pending//
+
+CREATE PROCEDURE sp_fulfillment_request_list_pending(
+    IN p_admin_id BIGINT
+)
+BEGIN
+    SELECT
+        r.id,
+        r.sabbpe_order_id,
+        r.customer_id,
+        r.customer_name,
+        r.customer_mobile,
+        r.order_amount,
+        r.lock_price,
+        r.block_id,
+        r.metal_type,
+        r.merchant_order_id,
+        r.augmont_message,
+        r.status,
+        r.level1_note,
+        r.level2_note,
+        r.retry_count,
+        DATE_FORMAT(r.last_retry_at, '%Y-%m-%d %H:%i:%s') AS last_retry_at,
+        cr.fullName AS created_by_name,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM gold_fulfillment_requests r
+    LEFT JOIN dashboard_admin_users cr ON cr.id = r.created_by
+    WHERE r.status = 'PENDING'
+    ORDER BY r.created_at ASC;
+END//
+
+-- ============================================================
+-- 4. LIST mine (Level 1) - includes buy details + augmont message
+-- ============================================================
+DROP PROCEDURE IF EXISTS sp_fulfillment_request_list_mine//
+
+CREATE PROCEDURE sp_fulfillment_request_list_mine(
+    IN p_admin_id BIGINT
+)
+BEGIN
+    SELECT
+        r.id,
+        r.sabbpe_order_id,
+        r.customer_id,
+        r.customer_name,
+        r.customer_mobile,
+        r.order_amount,
+        r.lock_price,
+        r.block_id,
+        r.metal_type,
+        r.merchant_order_id,
+        r.augmont_message,
+        r.status,
+        r.level1_note,
+        r.level2_note,
+        r.retry_count,
+        DATE_FORMAT(r.last_retry_at, '%Y-%m-%d %H:%i:%s') AS last_retry_at,
+        a.fullName AS assigned_to_name,
+        DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+        DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM gold_fulfillment_requests r
+    LEFT JOIN dashboard_admin_users a ON a.id = r.assigned_to
+    WHERE r.created_by = p_admin_id
+    ORDER BY r.created_at DESC;
+END//
+
+DELIMITER ;

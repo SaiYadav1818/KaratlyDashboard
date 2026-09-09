@@ -15,30 +15,33 @@ public class GoldFulfillmentController {
         this.service = service;
     }
 
-    public record CreateRequest(long adminId, String sabbpeOrderId, String customerId,
-                                String customerName, String customerMobile, double orderAmount,
-                                String metalType, String merchantOrderId, String level1Note) {}
+    public record CreateRequest(long adminId, String uniqueId, String level1Note) {}
 
     public record PendingRequest(long adminId) {}
+
+    public record LookupRequest(long adminId, String uniqueId) {}
 
     public record RetryRequest(long adminId, String note) {}
 
     /**
      * POST /api/v1/admin/fulfillment/create
-     * Level 1 admin: send a request to Level 2
+     * Level 1 admin: send request to Level 2 using ONLY the unique id.
+     * All order details (merchant id, amount, augmont message) are auto-fetched.
      */
     @PostMapping("/create")
     public Map<String, Object> createRequest(@RequestBody CreateRequest request) {
-        return service.createRequest(String.valueOf(request.adminId()), Map.of(
-                "sabbpe_order_id", request.sabbpeOrderId(),
-                "customer_id", request.customerId(),
-                "customer_name", request.customerName() != null ? request.customerName() : "",
-                "customer_mobile", request.customerMobile() != null ? request.customerMobile() : "",
-                "order_amount", request.orderAmount(),
-                "metal_type", request.metalType() != null ? request.metalType() : "gold",
-                "merchant_order_id", request.merchantOrderId() != null ? request.merchantOrderId() : "",
-                "level1_note", request.level1Note() != null ? request.level1Note() : ""
-        ));
+        return service.createRequest(String.valueOf(request.adminId()),
+                request.uniqueId(), request.level1Note() != null ? request.level1Note() : "");
+    }
+
+    /**
+     * POST /api/v1/admin/fulfillment/lookup-unique
+     * Get all order + buy request details (especially merchant id + augmont message)
+     * for a unique id. For Level 1 before sending, and Level 2 to review.
+     */
+    @PostMapping("/lookup-unique")
+    public Map<String, Object> lookupByUniqueId(@RequestBody LookupRequest request) {
+        return service.lookupByUniqueId(String.valueOf(request.adminId()), request.uniqueId());
     }
 
     /**

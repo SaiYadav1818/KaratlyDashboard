@@ -1,0 +1,89 @@
+# Frontend Integration — Fulfillment by Unique ID (No Token)
+
+Base URL: `http://localhost:8082`
+NO `Authorization` header needed. `adminId` is in the body.
+
+## FLOW
+```
+Level 1 → sends ONLY uniqueId → Level 2 sees full details (merchant id, augmont msg) → retries with live rate
+```
+
+## 1. Lookup by Unique ID (Level 1 or Level 2)
+Shows all order data + buy request details + Augmont message (from provider_response_payload)
+```
+POST /api/v1/admin/fulfillment/lookup-unique
+Body: { "adminId": 1, "uniqueId": "09876543212" }
+```
+Response:
+```json
+{
+  "orders": [
+    {
+      "sabbpe_order_id": "SABBPE_123",
+      "merchant_order_id": "MERCHANT_789",
+      "customer_id": "09876543212",
+      "customer_name": "Rahul Sharma",
+      "customer_mobile": "919876543210",
+      "order_amount": 5000.00,
+      "order_status": "PAID",
+      "fulfillment_status": "FULFILLMENT_FAILED: ...",
+      "flow_type": "DIGITAL_BUY",
+      "metal_type": "gold",
+      "lock_price": "7150.50",
+      "block_id": "BLOCK_456",
+      "payment_status": "SUCCESS",
+      "cf_payment_id": "12345",
+      "augmont_message": "Insufficient balance",      <- from provider_response_payload
+      "provider_response_payload": "{...}",           <- full raw payload
+      "payment_time": "2026-09-09 10:00:00",
+      "created_at": "2026-09-09 09:30:00"
+    }
+  ]
+}
+```
+
+## 2. Create Request (Level 1) — ONLY uniqueId
+```
+POST /api/v1/admin/fulfillment/create
+Body: { "adminId": 1, "uniqueId": "09876543212", "level1Note": "Gold not received" }
+```
+Response:
+```json
+{
+  "success": true,
+  "request_id": 1,
+  "request": {
+    "id": 1,
+    "sabbpe_order_id": "SABBPE_123",
+    "merchant_order_id": "MERCHANT_789",
+    "customer_id": "09876543212",
+    "order_amount": 5000.00,
+    "metal_type": "gold",
+    "status": "PENDING"
+  },
+  "message": "Request sent to Level 2 admin"
+}
+```
+
+## 3. Pending Requests (Level 2)
+```
+POST /api/v1/admin/fulfillment/pending
+Body: { "adminId": 2 }
+```
+Each request now includes:
+- `merchant_order_id` (buy request id for Augmont)
+- `augmont_message` (from provider_response_payload)
+- `lock_price`, `block_id`, `metal_type`, `order_amount`, `retry_count`
+
+## 4. Retry Buy (Level 2) — live rate
+```
+POST /api/v1/admin/fulfillment/1/retry-buy
+Body: { "adminId": 2, "note": "Retrying" }
+```
+
+## SQL to run first
+`db/execute_part9_fulfillment_unique.txt` (run after PART 8)
+
+## UI Notes
+- Level 1 search form: just type the Augmont unique id → see lookup result → send request
+- Level 2 pending screen shows merchant_order_id + augmont message per request

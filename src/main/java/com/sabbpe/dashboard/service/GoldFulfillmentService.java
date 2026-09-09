@@ -24,25 +24,31 @@ public class GoldFulfillmentService {
         this.sabbpeBackendService = sabbpeBackendService;
     }
 
-    public Map<String, Object> createRequest(String adminId, Map<String, Object> request) {
+    public Map<String, Object> createRequest(String adminId, String uniqueId, String note) {
         long adminIdLong = Long.parseLong(adminId);
-        String sabbpeOrderId = getStringOrThrow(request, "sabbpe_order_id");
-        String customerId = getStringOrThrow(request, "customer_id");
-        String customerName = getOrDefault(request, "customer_name", "");
-        String customerMobile = getOrDefault(request, "customer_mobile", "");
-        double orderAmount = getDoubleOrThrow(request, "order_amount");
-        String metalType = getOrDefault(request, "metal_type", "gold");
-        String merchantOrderId = getOrDefault(request, "merchant_order_id", null);
-        String note = getOrDefault(request, "level1_note", null);
+        if (uniqueId == null || uniqueId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "uniqueId is required");
+        }
 
-        long requestId = repository.createRequest(sabbpeOrderId, customerId, customerName,
-                customerMobile, orderAmount, null, null, metalType, merchantOrderId,
-                adminIdLong, note);
+        long requestId = repository.createRequest(uniqueId.trim(), adminIdLong, note);
+
+        // Return the created request with all resolved details (merchant id, augmont message, etc.)
+        Map<String, Object> created = repository.getRequestById(requestId);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
         result.put("request_id", requestId);
+        result.put("request", created);
         result.put("message", "Request sent to Level 2 admin");
+        return result;
+    }
+
+    public Map<String, Object> lookupByUniqueId(String adminId, String uniqueId) {
+        if (uniqueId == null || uniqueId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "uniqueId is required");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("orders", repository.lookupByUniqueId(uniqueId.trim()));
         return result;
     }
 
@@ -150,36 +156,5 @@ public class GoldFulfillmentService {
         result.put("live_rate_used", lockPrice);
         result.put("buy_response", buyResponse);
         return result;
-    }
-
-    private String getStringOrThrow(Map<String, Object> map, String key) {
-        Object val = map.get(key);
-        if (val == null || val.toString().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " is required");
-        }
-        return val.toString().trim();
-    }
-
-    private String getOrDefault(Map<String, Object> map, String key, String defaultVal) {
-        Object val = map.get(key);
-        if (val == null || val.toString().isBlank()) {
-            return defaultVal;
-        }
-        return val.toString().trim();
-    }
-
-    private double getDoubleOrThrow(Map<String, Object> map, String key) {
-        Object val = map.get(key);
-        if (val == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " is required");
-        }
-        if (val instanceof Number n) {
-            return n.doubleValue();
-        }
-        try {
-            return Double.parseDouble(val.toString());
-        } catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, key + " must be a number");
-        }
     }
 }
