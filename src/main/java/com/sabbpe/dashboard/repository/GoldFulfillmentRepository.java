@@ -62,10 +62,10 @@ public class GoldFulfillmentRepository {
     public Map<String, Object> getRequestById(long requestId) {
         try {
             return jdbc.queryForMap(
-                    """SELECT id, sabbpe_order_id, customer_id, customer_name, customer_mobile,
-                       order_amount, lock_price, block_id, metal_type, merchant_order_id,
-                       status, level1_note, level2_note, retry_count
-                       FROM gold_fulfillment_requests WHERE id = ?""",
+                    "SELECT id, sabbpe_order_id, customer_id, customer_name, customer_mobile, " +
+                    "order_amount, lock_price, block_id, metal_type, merchant_order_id, " +
+                    "status, level1_note, level2_note, retry_count " +
+                    "FROM gold_fulfillment_requests WHERE id = ?",
                     requestId);
         } catch (EmptyResultDataAccessException ex) {
             return Map.of();

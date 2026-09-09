@@ -88,15 +88,15 @@ public class GoldFulfillmentService {
                 // Try to get gold buy rate
                 Object goldBuy = payloadMap.get("goldBuy");
                 if (goldBuy instanceof Map<?, ?> goldBuyMap) {
-                    lockPrice = String.valueOf(goldBuyMap.getOrDefault("lockPrice", ""));
-                    blockId = String.valueOf(goldBuyMap.getOrDefault("blockId", ""));
+                    lockPrice = String.valueOf(goldBuyMap.get("lockPrice"));
+                    blockId = String.valueOf(goldBuyMap.get("blockId"));
                 }
                 // If silver, try silverBuy
                 if ("silver".equalsIgnoreCase(metalType)) {
                     Object silverBuy = payloadMap.get("silverBuy");
                     if (silverBuy instanceof Map<?, ?> silverBuyMap) {
-                        lockPrice = String.valueOf(silverBuyMap.getOrDefault("lockPrice", ""));
-                        blockId = String.valueOf(silverBuyMap.getOrDefault("blockId", ""));
+                        lockPrice = String.valueOf(silverBuyMap.get("lockPrice"));
+                        blockId = String.valueOf(silverBuyMap.get("blockId"));
                     }
                 }
             }

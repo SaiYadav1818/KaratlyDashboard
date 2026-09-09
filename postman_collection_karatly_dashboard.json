@@ -1,0 +1,192 @@
+{
+	"info": {
+		"name": "Karatly Dashboard",
+		"description": "All karatly-dashboard APIs — fulfillment, search, retry-buy",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8082"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Login Level 2 (Super Admin)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/auth/login",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"phoneNumber\": \"9999999999\",\n  \"password\": \"admin@123\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "2. Login Level 1 (Regular Admin)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/auth/login",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"phoneNumber\": \"8888888888\",\n  \"password\": \"admin@123\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Search Client",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/dashboard/search",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"term\": \"919876543210\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Unfulfilled Orders (Paid but No Gold)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/dashboard/unfulfilled-cashfree",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"days\": 90,\n  \"status\": \"ALL\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Create Fulfillment Request (Level 1)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"if (jsonData.success) {",
+							"    pm.collectionVariables.set('request_id', jsonData.request_id);",
+							"    console.log('Saved request_id: ' + jsonData.request_id);",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/create",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": 1,\n  \"sabbpeOrderId\": \"SABBPE_123\",\n  \"customerId\": \"09876543212\",\n  \"customerName\": \"Rahul Sharma\",\n  \"customerMobile\": \"919876543210\",\n  \"orderAmount\": 5000.00,\n  \"metalType\": \"gold\",\n  \"merchantOrderId\": \"MERCHANT_789\",\n  \"level1Note\": \"User paid but gold not received\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "6. View Pending Requests (Level 2)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/pending",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": 2\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "7. Retry Buy (Level 2 — Live Rate)",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/fulfillment/1/retry-buy",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"adminId\": 2,\n  \"note\": \"Retrying with live rate\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "8. Unfulfilled — FAILED only",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/dashboard/unfulfilled-cashfree",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"days\": 90,\n  \"status\": \"FAILED\"\n}"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "9. Unfulfilled — PENDING only",
+			"request": {
+				"method": "POST",
+				"url": "{{baseUrl}}/api/v1/admin/dashboard/unfulfilled-cashfree",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"days\": 90,\n  \"status\": \"PENDING\"\n}"
+				}
+			},
+			"response": []
+		}
+	]
+}
