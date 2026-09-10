@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.security.SecureRandom;
 
 @Service
 public class AuthService {
@@ -18,6 +19,9 @@ public class AuthService {
 
     private final AdminAuthRepository repository;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+    private final SecureRandom random = new SecureRandom();
+    private static final String GENERATED_PASSWORD_CHARS =
+            "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
     public AuthService(AdminAuthRepository repository) {
         this.repository = repository;
@@ -45,6 +49,42 @@ public class AuthService {
         return toAdminView(admin);
     }
 
+    public Map<String, Object> changePassword(long adminId, String existingPassword,
+                                               String newPassword, String confirmPassword) {
+        if (newPassword == null || !newPassword.equals(confirmPassword)) {
+            return Map.of("success", false, "message", "New password and confirmation do not match");
+        }
+        validatePassword(newPassword);
+        Map<String, Object> admin = repository.getById(adminId);
+        if (admin.isEmpty() || !isActive(admin)) {
+            return Map.of("success", false, "message", "Admin account not found or inactive");
+        }
+        if (!encoder.matches(existingPassword, String.valueOf(admin.get("password_hash")))) {
+            return Map.of("success", false, "message", "Existing password is incorrect");
+        }
+        repository.updatePassword(adminId, encoder.encode(newPassword));
+        return Map.of("success", true, "message", "Password changed successfully");
+    }
+
+    public Map<String, Object> forgotPassword(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            return Map.of("success", false, "message", "Phone number or email is required");
+        }
+        Map<String, Object> admin = repository.getByPhoneOrEmail(identifier.trim());
+        if (admin.isEmpty() || !isActive(admin)) {
+            return Map.of("success", false, "message", "Admin account not found or inactive");
+        }
+        String generatedPassword = generatePassword();
+        repository.updatePassword(((Number) admin.get("id")).longValue(), encoder.encode(generatedPassword));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("success", true);
+        response.put("message", "Password generated successfully");
+        response.put("phoneNumber", admin.get("phone_number"));
+        response.put("email", admin.get("email"));
+        response.put("generatedPassword", generatedPassword);
+        return response;
+    }
+
     public Map<String, Object> createAdmin(String phone, String name,
                                            String email, String password, boolean isSuper) {
         validatePassword(password);
@@ -66,6 +106,15 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Password must be at least 8 characters with at least one letter and one digit");
         }
+    }
+
+    private String generatePassword() {
+        StringBuilder password = new StringBuilder(10);
+        for (int i = 0; i < 10; i++) {
+            password.append(GENERATED_PASSWORD_CHARS.charAt(
+                    random.nextInt(GENERATED_PASSWORD_CHARS.length())));
+        }
+        return password.toString();
     }
 
     private Map<String, Object> toAdminView(Map<String, Object> admin) {

@@ -24,6 +24,20 @@ public class AdminAuthRepository {
         }
     }
 
+    public Map<String, Object> getByPhoneOrEmail(String identifier) {
+        try {
+            return jdbc.queryForMap("""
+                    SELECT id, phone_number, full_name, email, password_hash,
+                           is_super_admin, is_active
+                    FROM dashboard_admin_users
+                    WHERE phone_number = ? OR LOWER(email) = LOWER(?)
+                    LIMIT 1
+                    """, identifier, identifier);
+        } catch (EmptyResultDataAccessException ex) {
+            return Map.of();
+        }
+    }
+
     public Map<String, Object> getById(long id) {
         try {
             return jdbc.queryForMap("CALL sp_dashboard_admin_get_by_id(?)", id);

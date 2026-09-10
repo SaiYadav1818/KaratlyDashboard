@@ -16,12 +16,29 @@ public class AuthController {
     }
 
     public record LoginRequest(String phoneNumber, String password) {}
+    public record ChangePasswordRequest(Long adminId, String existingPassword,
+                                        String newPassword, String confirmPassword) {}
+    public record ForgotPasswordRequest(String identifier) {}
     public record CreateAdminRequest(String phoneNumber, String fullName, String email,
                                      String password, boolean isSuperAdmin) {}
 
     @PostMapping("/login")
     public Map<String, Object> login(@RequestBody LoginRequest request) {
         return authService.login(request.phoneNumber(), request.password());
+    }
+
+    @PostMapping("/change-password")
+    public Map<String, Object> changePassword(@RequestBody ChangePasswordRequest request) {
+        if (request.adminId() == null) {
+            return Map.of("success", false, "message", "adminId is required");
+        }
+        return authService.changePassword(request.adminId(), request.existingPassword(),
+                request.newPassword(), request.confirmPassword());
+    }
+
+    @PostMapping("/forgot-password")
+    public Map<String, Object> forgotPassword(@RequestBody ForgotPasswordRequest request) {
+        return authService.forgotPassword(request.identifier());
     }
 
     @PostMapping("/admin")

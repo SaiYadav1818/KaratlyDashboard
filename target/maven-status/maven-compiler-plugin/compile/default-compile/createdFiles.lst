@@ -12,6 +12,7 @@ com\sabbpe\dashboard\DashboardApplication.class
 com\sabbpe\dashboard\repository\GoldFulfillmentRepository.class
 com\sabbpe\dashboard\filter\ApiRequestResponseLoggingFilter.class
 com\sabbpe\dashboard\service\GoldFulfillmentService.class
+com\sabbpe\dashboard\controller\AuthController$ForgotPasswordRequest.class
 com\sabbpe\dashboard\repository\AlertRepository.class
 com\sabbpe\dashboard\controller\GoldFulfillmentController$LookupRequest.class
 com\sabbpe\dashboard\controller\GoldFulfillmentController$CreateRequest.class
@@ -20,4 +21,5 @@ com\sabbpe\dashboard\controller\AuthController.class
 com\sabbpe\dashboard\controller\AlertController$ResolveRequest.class
 com\sabbpe\dashboard\controller\AlertController.class
 com\sabbpe\dashboard\service\AlertService.class
+com\sabbpe\dashboard\controller\AuthController$ChangePasswordRequest.class
 com\sabbpe\dashboard\service\AuthService.class
