@@ -66,13 +66,16 @@ public class AuthService {
         return Map.of("success", true, "message", "Password changed successfully");
     }
 
-    public Map<String, Object> forgotPassword(String identifier) {
+    public Map<String, Object> forgotPassword(String identifier, String existingPassword) {
         if (identifier == null || identifier.isBlank()) {
             return Map.of("success", false, "message", "Phone number or email is required");
         }
         Map<String, Object> admin = repository.getByPhoneOrEmail(identifier.trim());
         if (admin.isEmpty() || !isActive(admin)) {
             return Map.of("success", false, "message", "Admin account not found or inactive");
+        }
+        if (!encoder.matches(existingPassword, String.valueOf(admin.get("password_hash")))) {
+            return Map.of("success", false, "message", "Existing password is incorrect");
         }
         String generatedPassword = generatePassword();
         repository.updatePassword(((Number) admin.get("id")).longValue(), encoder.encode(generatedPassword));
