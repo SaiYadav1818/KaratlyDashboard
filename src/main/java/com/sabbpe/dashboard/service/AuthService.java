@@ -66,7 +66,8 @@ public class AuthService {
         return Map.of("success", true, "message", "Password changed successfully");
     }
 
-    public Map<String, Object> forgotPassword(String identifier, String existingPassword) {
+    public Map<String, Object> forgotPassword(String identifier, String existingPassword,
+                                               String newPassword, String confirmPassword) {
         if (identifier == null || identifier.isBlank()) {
             return Map.of("success", false, "message", "Phone number or email is required");
         }
@@ -77,14 +78,25 @@ public class AuthService {
         if (!encoder.matches(existingPassword, String.valueOf(admin.get("password_hash")))) {
             return Map.of("success", false, "message", "Existing password is incorrect");
         }
-        String generatedPassword = generatePassword();
-        repository.updatePassword(((Number) admin.get("id")).longValue(), encoder.encode(generatedPassword));
+        boolean hasNewPassword = newPassword != null && !newPassword.isBlank();
+        boolean hasConfirmation = confirmPassword != null && !confirmPassword.isBlank();
+        String passwordToUse;
+        if (hasNewPassword || hasConfirmation) {
+            if (!hasNewPassword || !hasConfirmation || !newPassword.equals(confirmPassword)) {
+                return Map.of("success", false, "message", "New password and confirmation do not match");
+            }
+            validatePassword(newPassword);
+            passwordToUse = newPassword;
+        } else {
+            passwordToUse = generatePassword();
+        }
+        repository.updatePassword(((Number) admin.get("id")).longValue(), encoder.encode(passwordToUse));
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("success", true);
-        response.put("message", "Password generated successfully");
+        response.put("message", "Password updated successfully");
         response.put("phoneNumber", admin.get("phone_number"));
         response.put("email", admin.get("email"));
-        response.put("generatedPassword", generatedPassword);
+        response.put("generatedPassword", passwordToUse);
         return response;
     }
 

@@ -1,4 +1,3 @@
-com\sabbpe\dashboard\config\CorsConfig.class
 com\sabbpe\dashboard\controller\AlertController$AdminActionRequest.class
 com\sabbpe\dashboard\config\GlobalExceptionHandler.class
 com\sabbpe\dashboard\controller\AuthController$LoginRequest.class

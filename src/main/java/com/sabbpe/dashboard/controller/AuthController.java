@@ -18,7 +18,8 @@ public class AuthController {
     public record LoginRequest(String phoneNumber, String password) {}
     public record ChangePasswordRequest(Long adminId, String existingPassword,
                                         String newPassword, String confirmPassword) {}
-    public record ForgotPasswordRequest(String identifier, String existingPassword) {}
+    public record ForgotPasswordRequest(String identifier, String existingPassword,
+                                        String newPassword, String confirmPassword) {}
     public record CreateAdminRequest(String phoneNumber, String fullName, String email,
                                      String password, boolean isSuperAdmin) {}
 
@@ -38,7 +39,8 @@ public class AuthController {
 
     @PostMapping("/forgot-password")
     public Map<String, Object> forgotPassword(@RequestBody ForgotPasswordRequest request) {
-        return authService.forgotPassword(request.identifier(), request.existingPassword());
+        return authService.forgotPassword(request.identifier(), request.existingPassword(),
+                request.newPassword(), request.confirmPassword());
     }
 
     @PostMapping("/admin")
